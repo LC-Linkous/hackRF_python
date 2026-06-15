@@ -2,7 +2,7 @@
 
 Real recordings from a HackRF One, for trying the library and downstream processing without owning a board.
 
-- collected: 2026-06-15T13:25:40
+- collected: 2026-06-15T13:48:13
 - device firmware: 2024.02.1 (API:1.08)
 - tools: git-b1dbb47
 - sample rate: 2 Msps, 0.5s per IQ capture
