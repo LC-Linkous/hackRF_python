@@ -77,6 +77,44 @@ class SweepMixin:
         k.pop("num_sweeps", None)
         return list(self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k))
 
+    def sweep_to_file(self, f_min_hz, f_max_hz, out, *, binary=False,
+                      inverse_fft=False, bin_width=None, lna=16, vga=20,
+                      amp=False, one_shot=False, num_sweeps=None,
+                      print_cmd=False):
+        # Write sweep output straight to a file instead of yielding parsed
+        # rows. This is the home for hackrf_sweep's binary-output flags, which
+        # don't fit the text-CSV generator:
+        #   binary=True       -> -B  raw binary FFT-bin output
+        #   inverse_fft=True  -> -I  binary inverse-FFT output (implies binary)
+        # With neither, this writes the normal CSV text to the file via -r.
+        # Returns the output path. The binary formats are NOT parsed by this
+        # library (parse_sweep_line is text-only); you own the format on read.
+        f_min_hz = self._check_hard_range("f_min", f_min_hz,
+                                          C.FREQ_MIN_HZ, C.FREQ_MAX_HZ)
+        f_max_hz = self._check_hard_range("f_max", f_max_hz,
+                                          C.FREQ_MIN_HZ, C.FREQ_MAX_HZ)
+        if f_min_hz >= f_max_hz:
+            from ..exceptions import HackRFValueError
+            raise HackRFValueError("f_min must be < f_max")
+        lna = self._snap_gain("lna_gain", lna, C.LNA_GAIN)
+        vga = self._snap_gain("vga_gain", vga, C.VGA_GAIN)
+        lo = int(f_min_hz // 1_000_000)
+        hi = int(f_max_hz // 1_000_000)
+        argv = ["sweep", "-f", f"{lo}:{hi}", "-l", lna, "-g", vga,
+                "-a", 1 if amp else 0, "-r", out]
+        if bin_width is not None:
+            argv += ["-w", int(bin_width)]
+        if one_shot:
+            argv += ["-1"]
+        if num_sweeps is not None:
+            argv += ["-N", int(num_sweeps)]
+        if inverse_fft:
+            argv += ["-I"]          # binary inverse FFT (binary output mode)
+        elif binary:
+            argv += ["-B"]          # raw binary output
+        res = self._run(argv, mode="blocking", print_cmd=print_cmd)
+        return None if print_cmd else out
+
     def sweep_stream(self, f_min_hz, f_max_hz, **k):
         # Context manager around the sweep generator so the underlying
         # hackrf_sweep is ALWAYS reaped on exit -- including KeyboardInterrupt

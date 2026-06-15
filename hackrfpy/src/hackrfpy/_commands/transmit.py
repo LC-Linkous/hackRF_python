@@ -69,3 +69,36 @@ class TransmitMixin:
 
     def transmit_file(self, freq, sample_rate, source, **k):
         return self.transmit(freq, sample_rate, source, **k)
+
+    def transmit_cw(self, freq, sample_rate, *, amplitude=127, txvga=20,
+                    amp=False, bias_tee=False, baseband_bw=None,
+                    duration=None, max_duration=None, print_cmd=False):
+        # Constant-wave / signal-source test mode: hackrf_transfer -c <amp>.
+        # Transmits a fixed signal at `amplitude` (0-127) instead of a file.
+        # TX-gated like any transmit. Useful for antenna/range testing. Open-
+        # ended unless duration/max_duration bounds it (the dead-man applies).
+        self.require_mode(C.MODE_TX)
+        freq, sample_rate, txvga, amp = self.validate_tx(
+            freq, sample_rate, txvga, amp)
+        bw = self._auto_baseband(sample_rate, baseband_bw)
+        amplitude = max(0, min(int(amplitude), 127))
+        self._record_params(freq=freq, sample_rate=sample_rate, txvga=txvga,
+                            amp=amp, baseband_bw=bw, mode="tx", cw=amplitude)
+        self.print_message(f"[*] mode: {self.mode}  (TX, CW source)")
+
+        argv = ["transfer", "-c", amplitude,
+                "-f", int(freq), "-s", int(sample_rate),
+                "-x", txvga, "-a", 1 if amp else 0, "-b", int(bw)]
+        if bias_tee:
+            argv += ["-p", 1]
+
+        timed = duration if duration is not None else max_duration
+        if timed is not None:
+            return self._run(argv, mode="timed", duration=timed,
+                             print_cmd=print_cmd)
+        if print_cmd:
+            self._run(argv, mode="blocking", print_cmd=True)
+            return None
+        self.warn("open-ended CW transmit with no duration/max_duration; "
+                  "caller must .stop() the returned handle.")
+        return self._run(argv, mode="handle", kind="tx")
