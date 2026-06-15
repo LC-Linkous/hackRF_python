@@ -115,12 +115,12 @@ class DeviceMixin:
             except HackRFDeviceError as e:
                 report["problems"].append(str(e))
 
-        # 2b. feature probe: derive capability flags from the tool version so
-        #     callers can gate behavior programmatically (instead of every
-        #     call site re-deriving "is this version new enough"). This is the
-        #     'version/feature probe beyond doctor' -- also exposed via
-        #     features() for use without running the whole preflight.
-        report["features"] = self.features(report.get("tool_version"))
+        # 2b. feature probe: derive capability flags from the firmware version
+        #     (reliable year) and tools version. See features().
+        fw = None
+        if report["boards"]:
+            fw = report["boards"][0].get("firmware_version")
+        report["features"] = self.features(report.get("tool_version"), fw)
 
         # 3. disk
         try:
@@ -136,29 +136,45 @@ class DeviceMixin:
     def doctor(self, capture_path="."):
         return self.preflight(capture_path=capture_path)
 
-    def features(self, tool_version=None):
-        # Map a hackrf-tools version string -> capability flags. If no version
-        # is passed, probe the device once. Pure + table-driven so it is unit-
-        # testable without hardware. Conservative: unknown/unparseable version
-        # assumes the modern feature set is present but flags it uncertain.
-        if tool_version is None:
+    def features(self, tool_version=None, firmware_version=None):
+        # Map version strings -> capability flags. The reliable year signal is
+        # the FIRMWARE version (e.g. "2024.02.1"); the tools version is often a
+        # git tag (e.g. "git-b1dbb47") with no parseable year. If nothing is
+        # passed, probe the device once and use both. Table-driven + pure, so
+        # unit-testable without hardware.
+        if tool_version is None and firmware_version is None:
             try:
                 parsed = self.parse_info(
                     self._run(["info"], mode="blocking", text=True)[0])
                 tool_version = (parsed.get("library", {})
                                 .get("hackrf_info_version"))
+                boards = parsed.get("boards", [])
+                if boards:
+                    firmware_version = boards[0].get("firmware_version")
             except HackRFDeviceError:
-                tool_version = None
-        m = re.match(r"(\d{4})", tool_version or "")
-        year = int(m.group(1)) if m else None
-        # Feature availability by release year (coarse but matches the known
-        # breakpoints: stdout streaming + sweep -N stabilized by ~2021).
+                pass
+
+        # Prefer the firmware version's year; fall back to the tools version.
+        # A "git-" build is a from-source build, which is current by
+        # definition -- treat it as modern rather than merely "unknown".
+        def _year(v):
+            m = re.match(r"(\d{4})", v or "")
+            return int(m.group(1)) if m else None
+
+        year = _year(firmware_version) or _year(tool_version)
+        is_git = ((tool_version or "").startswith("git-")
+                  or (firmware_version or "").startswith("git-"))
+        # known if we have a real year OR it's an identifiable git build
+        known = year is not None or is_git
+        modern = is_git or year is None or year >= 2021
         return {
             "tool_version": tool_version,
-            "version_known": year is not None,
-            "stdout_streaming": year is None or year >= 2021,  # rx -r - / sweep
-            "sweep_num_sweeps": year is None or year >= 2021,  # sweep -N
-            "bias_tee": year is None or year >= 2018,          # -p
+            "firmware_version": firmware_version,
+            "version_known": known,
+            "is_git_build": is_git,
+            "stdout_streaming": modern,                    # rx -r - / sweep
+            "sweep_num_sweeps": modern,                    # sweep -N
+            "bias_tee": is_git or year is None or year >= 2018,  # -p
         }
 
     def _print_preflight(self, r):

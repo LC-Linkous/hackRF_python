@@ -38,6 +38,34 @@ from . import presets as P
 
 
 # ---- mode state file (mode persists across CLI invocations) ------------------
+def _print_detect(det):
+    print("hackrfpy detect")
+    print("-" * 40)
+    if det["problem"] and not det["found"]:
+        print(f"  {det['problem']}")
+        return
+    print(f"  boards found    : {det['count']}")
+    if det["tools_version"]:
+        print(f"  hackrf-tools    : {det['tools_version']}")
+    if det["libhackrf_version"]:
+        print(f"  libhackrf       : {det['libhackrf_version']}")
+    for b in det["boards"]:
+        tag = "HackRF" if b["is_hackrf"] else "UNCONFIRMED"
+        print(f"  [{b['index']}] {tag}")
+        print(f"      serial   : {b['serial']}")
+        print(f"      name     : {b['name']}")
+        print(f"      firmware : {b['firmware']}"
+              + ("  (stale: <2021, streaming/-N may be unsupported)"
+                 if b["firmware_stale"] else ""))
+    if det["multiple"]:
+        print("  ! multiple boards: select one with --serial <serial>")
+    for w in det.get("warnings", []):
+        print(f"  ! {w}")
+    print(f"  ready           : {'yes' if det['ready'] else 'no'}")
+    if det["problem"] and det["found"]:
+        print(f"  note            : {det['problem']}")
+
+
 def _state_path():
     base = os.environ.get("XDG_CONFIG_HOME",
                           os.path.join(os.path.expanduser("~"), ".config"))
@@ -90,6 +118,11 @@ class HackRFCLI:
         sp.add_argument("--raw", action="store_true")
         sp.add_argument("-v", "--verbose", action="store_true")
         sp.add_argument("--print-cmd", dest="print_cmd", action="store_true")
+
+        # detect
+        sp = sub.add_parser("detect",
+                            help="autodetect + identify connected HackRF(s)")
+        sp.add_argument("-v", "--verbose", action="store_true")
 
         # doctor
         sp = sub.add_parser("doctor", help="environment / preflight check")
@@ -190,6 +223,13 @@ class HackRFCLI:
             res = h.info(raw=args.raw, print_cmd=args.print_cmd)
             if not args.print_cmd:
                 print(res)
+
+        elif name == "detect":
+            det = h.detect()
+            _print_detect(det)
+            # exit non-zero when not ready, so `hrf detect && hrf rx ...` works
+            if not det["ready"]:
+                sys.exit(1)
 
         elif name == "doctor":
             report = h.doctor(capture_path=args.path)
