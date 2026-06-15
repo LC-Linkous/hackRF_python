@@ -1,0 +1,22 @@
+### operacake -l
+Opera Cakes found: None
+
+
+### clock -r
+hackrf_clock - HackRF clock configuration utility
+Usage:
+	-h, --help: this help
+	-r, --read <clock_num>: read settings for clock_num
+	-a, --all: read settings for all clocks
+	-i, --clkin: get CLKIN status
+	-o, --clkout <clkout_enable>: enable/disable CLKOUT
+	-1, --p1 <signal>: select the HackRF Pro P1 SMA connector signal (default: clkin)
+	one of: clkin, trigger_in, trigger_out, p22_clkin, pps_out, aux_clk1, aux_clk2, off
+	-2, --p2 <signal>: select the signal for the HackRF Pro P2 SMA connector (default: clkout)
+	one of: clkout, trigger_in, trigger_out
+	-c, --clkin-ctrl <signal>: select the HackRF Pro CLKIN signal (default: p1)
+	one of: p1, p22
+	-d, --device <serial_number>: Serial number of desired HackRF.
+
+Examples:
+	hackrf_clock -r 3 : prints settings for CLKOUT

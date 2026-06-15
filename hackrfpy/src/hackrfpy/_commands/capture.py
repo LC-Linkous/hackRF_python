@@ -106,6 +106,29 @@ class CaptureMixin:
     def capture_seconds(self, freq, sample_rate, duration, **k):
         return self.capture(freq, sample_rate, duration=duration, **k)
 
+    def scan_frequencies(self, freqs, sample_rate, num_samples, *,
+                         on_capture=None, **k):
+        # Sequentially capture a fixed sample count at each frequency in
+        # `freqs`, retuning between them. This does NOT close the gapless-
+        # retune gap (each retune is a fresh hackrf_transfer with a short
+        # re-open, since the binary can't retune mid-stream) -- but it makes
+        # the common "look at several frequencies in one pass" workflow a
+        # single call instead of hand-rolled orchestration.
+        #
+        #   results = h.scan_frequencies([433.92e6, 868e6, 915e6], 8e6, 1e6)
+        #   # -> {freq: complex64 array}
+        #
+        # on_capture(freq, iq) is called per frequency if given (e.g. to
+        # process-and-discard instead of holding every array in memory).
+        results = {}
+        for f in freqs:
+            iq = self.capture_array(f, sample_rate, int(num_samples), **k)
+            if on_capture is not None:
+                on_capture(f, iq)
+            else:
+                results[f] = iq
+        return results if on_capture is None else None
+
     # ---- in-memory + context-managed entry points ----
     def capture_array(self, freq, sample_rate, num_samples, *,
                       return_params=False, **k):
@@ -150,6 +173,39 @@ class CaptureMixin:
         k.pop("to_stdout", None)
         gen = self.capture(freq, sample_rate, to_stdout=True, **k)
         return StreamCtx(gen)
+
+    def capture_callback(self, freq, sample_rate, on_block, *,
+                         max_samples=None, max_blocks=None, **k):
+        # Binder-style ergonomics over the subprocess stream: instead of the
+        # caller writing the receive loop, register a callback that fires with
+        # each decoded complex64 block as it arrives. This is the usability
+        # analog of libhackrf's rx callback -- same data, same latency as
+        # capture_stream, but the loop is inverted so calling code looks like
+        # the C-binding libraries.
+        #
+        #   def on_block(iq, n_so_far):
+        #       ...                      # return False to stop early
+        #
+        # The child is always reaped on exit (normal, early-stop, or
+        # exception). Stops when on_block returns False, when max_samples /
+        # max_blocks is reached, or when the source ends.
+        from .._stream_ctx import StreamCtx
+        k.pop("to_stdout", None)
+        total = 0
+        blocks = 0
+        with StreamCtx(self.capture(freq, sample_rate, to_stdout=True, **k)) \
+                as gen:
+            for iq in gen:
+                cont = on_block(iq, total)
+                total += len(iq)
+                blocks += 1
+                if cont is False:
+                    break
+                if max_samples is not None and total >= max_samples:
+                    break
+                if max_blocks is not None and blocks >= max_blocks:
+                    break
+        return total
 
     # ---- internals ----
     def _rx_argv(self, freq, sample_rate, target, lna, vga, amp, bias_tee,

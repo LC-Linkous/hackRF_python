@@ -41,6 +41,19 @@ for cand in (os.path.join(_HERE, "..", "src"), os.path.join(_HERE, "src")):
 from hackrfpy import HackRF                       # noqa: E402
 from hackrfpy.exceptions import HackRFError       # noqa: E402
 
+try:
+    import numpy as np                            # noqa: E402
+except ModuleNotFoundError:
+    sys.stderr.write(
+        "ERROR: numpy is not available in this environment.\n"
+        "  This usually means the script is running OUTSIDE the uv project "
+        "environment.\n"
+        "  Run it through uv so it uses the synced env that has numpy:\n"
+        "      uv run python tests/collect_real_data.py [args]\n"
+        "  (Plain `python ...` can pick up a different/activated .venv that "
+        "lacks the project deps.)\n")
+    sys.exit(1)
+
 FIXTURES = os.path.join(_HERE, "fixtures")
 
 
@@ -115,7 +128,7 @@ def collect(args):
     if sweep_lines:
         # add the two edge cases the parser tests rely on
         sweep_lines.append("this line is garbled and must parse to None")
-        _write("sweep_sample.csv", "\n".join(sweep_lines) + "\n",
+        _write("sweep_sample_real.csv", "\n".join(sweep_lines) + "\n",
                args.anonymize)
 
     # ---- 3. real IQ bytes (short receive) ----
@@ -129,13 +142,23 @@ def collect(args):
                   num_samples=int(args.rx_samples), out=tmp, sigmf=False)
         with open(tmp, "rb") as f:
             raw_iq = f.read()
-        # keep a SMALL slice as the committed fixture (16 bytes = 8 samples),
-        # matching the existing sample.iq size the tests expect
-        _write("sample_real.iq", raw_iq[:args.iq_fixture_bytes], False,
-               binary=True)
+        # keep a SMALL slice as the committed fixture. Take it from the MIDDLE
+        # of the capture, not the head: the first samples at a fresh tune are
+        # often a settling transient or silence (all-zero), which parses but
+        # doesn't prove decode works on real signal. Align to an even byte so
+        # we never split an I/Q pair.
+        nbytes = args.iq_fixture_bytes
+        mid = (len(raw_iq) // 2) & ~1            # even offset
+        slice_iq = raw_iq[mid:mid + nbytes]
+        if len(slice_iq) < nbytes:               # tiny capture fallback
+            slice_iq = raw_iq[:nbytes]
+        _write("sample_real.iq", slice_iq, False, binary=True)
+        # report whether the slice has real signal (non-zero) so the user
+        # knows the fixture is meaningful, not silence
+        nonzero = any(b not in (0,) for b in slice_iq)
         os.remove(tmp)
-        print(f"  captured {len(raw_iq)} bytes, kept "
-              f"{args.iq_fixture_bytes} as fixture")
+        print(f"  captured {len(raw_iq)} bytes, kept {nbytes} from offset "
+              f"{mid} (nonzero signal: {nonzero})")
     except HackRFError as e:
         print(f"  capture failed (recording the error, not fatal): {e}",
               file=sys.stderr)
@@ -144,7 +167,7 @@ def collect(args):
     print("\n== read-only device queries (best-effort) ==")
     extras = []
     for label, fn in [("operacake -l", lambda: h.operacake_list()),
-                      ("clock -r", lambda: h.clock("-r"))]:
+                      ("clock -a", lambda: h.clock("-a"))]:
         try:
             out = fn()
             text = out[0] if isinstance(out, tuple) else str(out)

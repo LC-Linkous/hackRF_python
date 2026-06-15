@@ -72,7 +72,12 @@ def test_from_device_raises_when_no_board(stub_device):
 
 
 # ---- preflight: optional tools missing is NOT a problem --------------------
-def test_preflight_optional_tools_not_flagged(stub_device, capsys):
+def test_preflight_optional_tools_not_flagged(stub_device, capsys, monkeypatch):
+    # Block the PATH fallback so a machine that actually has the optional tools
+    # installed (operacake/clock/etc. on PATH) doesn't leak them in -- we want
+    # to prove the CORE/OPTIONAL split, i.e. that a missing OPTIONAL tool is
+    # not a problem. Without this, resolve() finds the real binaries on PATH.
+    monkeypatch.setattr("shutil.which", lambda name: None)
     h = stub_device(
         info=dict(stdout_lines=[
             "hackrf_info version: 2024.02.1", "Found HackRF", "Index: 0",
@@ -83,6 +88,8 @@ def test_preflight_optional_tools_not_flagged(stub_device, capsys):
     capsys.readouterr()
     missing_core = [p for p in report["problems"] if "core binary" in p]
     assert not missing_core, report["problems"]
+    # operacake was NOT stubbed and PATH is blocked -> resolves to None, but
+    # because it's OPTIONAL it must not appear as a problem
     assert report["tools"]["hackrf_operacake"] is None
     assert not any("operacake" in p for p in report["problems"])
 

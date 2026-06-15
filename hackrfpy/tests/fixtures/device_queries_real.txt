@@ -1,0 +1,52 @@
+### operacake -l
+Opera Cakes found: None
+
+
+### clock -a
+MS0:
+	clock control = Up, Int Mode, PLL src A, MULTISYNTH SELF, 8 mA
+	p1 = 5888
+	p2 = 0
+	p3 = 1
+	Output (800Mhz PLL): 8.0000000000 Mhz
+	output divider = 2
+MS1:
+	clock control = Up, Int Mode, PLL src A, Inverted, MULTISYNTH 0 4, 2 mA
+	p1 = 0
+	p2 = 0
+	p3 = 0
+	output divider = 1
+MS2:
+	clock control = Up, Int Mode, PLL src A, MULTISYNTH 0 4, 2 mA
+	p1 = 0
+	p2 = 0
+	p3 = 0
+	output divider = 1
+MS3:
+	clock control = Down, Int Mode, PLL src A, XTAL, 2 mA
+	p1 = 0
+	p2 = 0
+	p3 = 0
+	output divider = 1
+MS4:
+	clock control = Up, Int Mode, PLL src A, Inverted, MULTISYNTH SELF, 6 mA
+	p1 = 2048
+	p2 = 0
+	p3 = 1
+	Output (800Mhz PLL): 40.0000000000 Mhz
+	output divider = 1
+MS5:
+	clock control = Up, Int Mode, PLL src A, MULTISYNTH SELF, 4 mA
+	p1 = 2048
+	p2 = 0
+	p3 = 1
+	Output (800Mhz PLL): 40.0000000000 Mhz
+	output divider = 1
+MS6:
+	clock control = Down, Int Mode, PLL src A, XTAL, 2 mA
+	p1_int = 0
+	output divider = 1
+MS7:
+	clock control = Down, Int Mode, PLL src A, XTAL, 2 mA
+	p1_int = 0
+	output divider = 1

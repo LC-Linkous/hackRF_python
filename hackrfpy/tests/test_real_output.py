@@ -86,3 +86,70 @@ def test_detect_surfaces_usb_warnings(stub_device):
     h = stub_device(info=dict(stdout_lines=_real_text().splitlines()))
     det = h.detect()
     assert any("USB bus" in w for w in det["warnings"])
+
+
+# ---- real IQ bytes: decode proves out on TRUE hardware samples -------------
+def test_real_iq_decodes_nonzero():
+    # sample_real.iq is a slice from the MIDDLE of a real 100 MHz capture (not
+    # the settling-transient head), so it must be real nonzero signal --
+    # proving decode_iq/load_iq work on true device bytes. The exact length
+    # depends on --iq-fixture-bytes at collection time, so assert structure +
+    # nonzero rather than a hardcoded count.
+    import numpy as np
+    from hackrfpy import load_iq
+    path = os.path.join(FIXTURES, "sample_real.iq")
+    if not os.path.exists(path):
+        import pytest
+        pytest.skip("sample_real.iq fixture not collected")
+    raw_len = os.path.getsize(path)
+    iq = load_iq(path)
+    assert iq.dtype == np.complex64
+    assert len(iq) == raw_len // 2             # 2 int8 bytes -> 1 complex
+    assert len(iq) > 0
+    assert not np.all(iq == 0), "real capture slice should not be all-zero"
+
+
+# ---- real sweep output: structure + the OUT-OF-ORDER segment behavior ------
+def _real_sweep_lines():
+    return open(os.path.join(FIXTURES, "sweep_sample_real.csv")).read().splitlines()
+
+
+def test_real_sweep_parses_four_rows():
+    from hackrfpy._commands.sweep import SweepMixin
+    rows = [SweepMixin.parse_sweep_line(l) for l in _real_sweep_lines()]
+    good = [r for r in rows if r]
+    assert len(good) == 4
+    # the garbage line is rejected
+    assert rows[-1] is None
+    # real output: 5 dB bins, 20 FFT samples, 1 MHz bin width
+    assert all(len(r["db"]) == 5 for r in good)
+    assert all(r["num_samples"] == 20 for r in good)
+    assert all(r["bin_width"] == 1_000_000.0 for r in good)
+
+
+def test_real_sweep_segments_are_out_of_order():
+    # REAL hackrf_sweep interleaves frequency segments -- it does NOT emit
+    # them low-to-high. This pins that behavior so no one writes consumer code
+    # assuming sorted order. Observed: 88, 98, 93, 103 (MHz).
+    from hackrfpy._commands.sweep import SweepMixin
+    good = [r for r in (SweepMixin.parse_sweep_line(l)
+                        for l in _real_sweep_lines()) if r]
+    lows = [r["hz_low"] for r in good]
+    assert lows != sorted(lows), "real sweep rows were in order this time, " \
+        "but the parser/consumers must not RELY on order"
+    # all rows share one timestamp -> they belong to a single sweep pass
+    assert len(set(r["time"] for r in good)) == 1
+
+
+def test_real_sweep_reassembles_correctly_when_sorted():
+    # The safe way to reconstruct a spectrum line: key by hz_low, sort. This
+    # is what waterfall_realtime.py does, and it survives the out-of-order rows.
+    import numpy as np
+    from hackrfpy._commands.sweep import SweepMixin
+    good = [r for r in (SweepMixin.parse_sweep_line(l)
+                        for l in _real_sweep_lines()) if r]
+    bins = {r["hz_low"]: np.array(r["db"]) for r in good}
+    ordered_freqs = sorted(bins)
+    assert [f // 1_000_000 for f in ordered_freqs] == [88, 93, 98, 103]
+    line = np.concatenate([bins[k] for k in ordered_freqs])
+    assert len(line) == 20      # 4 segments x 5 bins

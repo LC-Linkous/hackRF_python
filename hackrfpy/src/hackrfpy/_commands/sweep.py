@@ -62,6 +62,13 @@ class SweepMixin:
             # Relying on GC to do it is not deterministic, and an unclosed
             # inner generator leaves hackrf_sweep running ORPHANED after the
             # caller breaks out of the loop.
+            #
+            # NOTE on ordering: real hackrf_sweep does NOT emit frequency
+            # segments low-to-high -- it interleaves them (observed: 88, 98,
+            # 93, 103 MHz for an 88:108 sweep). All rows of ONE sweep share a
+            # timestamp. Consumers that need a contiguous spectrum must group
+            # by timestamp and sort segments by hz_low; do NOT assume the rows
+            # arrive in frequency order.
             inner = self._run(argv, mode="stream", text=True)
             try:
                 for line in inner:

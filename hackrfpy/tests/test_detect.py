@@ -62,11 +62,12 @@ def test_detect_multiple_boards_flags_disambiguation(stub_device):
     assert det["boards"][1]["firmware_stale"] is True
 
 
-def test_detect_missing_binary_is_not_raised(tmp_path):
-    # no hackrf_info anywhere -> detect() reports a problem, does NOT raise
+def test_detect_missing_binary_is_not_raised(tmp_path, monkeypatch):
+    # no hackrf_info anywhere -> detect() reports a problem, does NOT raise.
+    # Block the PATH fallback so a machine with hackrf-tools actually
+    # installed doesn't resolve a real binary (and find a real board).
+    monkeypatch.setattr("shutil.which", lambda name: None)
     h = HackRF(tools_dir=str(tmp_path))
-    import shutil
-    # ensure resolve fails: tools_dir empty and nothing on PATH for this name
     det = h.detect()
     assert det["found"] is False
     assert det["problem"] is not None

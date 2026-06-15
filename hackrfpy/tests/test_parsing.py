@@ -36,10 +36,15 @@ def test_decode_iq_odd_trailing_byte():
 
 
 def test_sweep_line_parse(fixtures_dir):
+    # Uses the SYNTHETIC fixture with known values (433 MHz band). The
+    # real-hardware sweep lives separately in sweep_sample_real.csv so the
+    # collection script can't clobber this one's controlled assertions.
     lines = open(os.path.join(fixtures_dir, "sweep_sample.csv")).read().splitlines()
     rows = [SweepMixin.parse_sweep_line(l) for l in lines]
     rows = [r for r in rows if r]
-    assert len(rows) == 2
+    assert len(rows) == 2, (
+        "expected the 2-row synthetic fixture; if this is 4 rows the real "
+        "collection overwrote sweep_sample.csv -- restore the synthetic one")
     assert rows[0]["hz_low"] == 433000000
     assert rows[0]["hz_high"] == 433500000
     assert len(rows[0]["db"]) == 5
