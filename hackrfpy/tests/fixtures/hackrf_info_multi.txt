@@ -1,0 +1,14 @@
+hackrf_info version: 2024.02.1
+libhackrf version: 2024.02.1 (0.9)
+Found HackRF
+Index: 0
+Serial number: 0000000000000000457863c82b4f3f
+Board ID Number: 2 (HackRF One)
+Firmware Version: 2024.02.1 (API:1.08)
+Part ID Number: 0xa000cb3c 0x004f4762
+Found HackRF
+Index: 1
+Serial number: 000000000000000088869dc38a11b2
+Board ID Number: 2 (HackRF One)
+Firmware Version: 2023.01.1 (API:1.07)
+Part ID Number: 0xa000cb3c 0x00474e63
