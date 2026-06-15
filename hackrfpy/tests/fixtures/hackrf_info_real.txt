@@ -2,10 +2,10 @@ hackrf_info version: git-b1dbb47
 libhackrf version: git-b1dbb47 (0.10.0)
 Found HackRF
 Index: 0
-Serial number: 0000000000000000f77c60dc275575c3
+Serial number: 00000000000000000123456789abcdef
 Board ID Number: 2 (HackRF One)
 Firmware Version: 2024.02.1 (API:1.08)
-Part ID Number: 0xa000cb3c 0x006f4351
+Part ID Number: 0xa000cb3c 0x00000000
 Hardware Revision: older than r6
 Hardware supported by installed firmware:
     HackRF One
