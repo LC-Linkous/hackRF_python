@@ -3,7 +3,7 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 
-## An UNOFFICIAL Python CLI + scripting wrapper for the HackRF One
+## AN UNOFFICIAL Python CLI + scripting wrapper for the HackRF One
 
 A non-GUI Python wrapper and command-line tool for the [HackRF One](https://greatscottgadgets.com/hackrf/one/) software-defined radio.
 
@@ -40,6 +40,8 @@ The primary GitHub: [https://github.com/LC-Linkous/hackRF_python](https://github
     * [Scan-then-Capture Pipeline](#scan-then-capture-pipeline)
     * [Transmitting](#transmitting)
     * [Reading Recordings Back](#reading-recordings-back)
+    * [Sample Data (no board required)](#sample-data-no-board-required)
+    * [Runnable Examples](#runnable-examples)
 * [Method Reference](#method-reference)
     * [Receive / Capture](#receive--capture)
     * [Sweep](#sweep)
@@ -47,6 +49,7 @@ The primary GitHub: [https://github.com/LC-Linkous/hackRF_python](https://github
     * [Info and Preflight](#info-and-preflight)
     * [Device Management (advanced)](#device-management-advanced)
     * [Decoding and File Helpers](#decoding-and-file-helpers)
+    * [Power and Relative Calibration](#power-and-relative-calibration)
     * [Mode, Validation, and Feedback](#mode-validation-and-feedback)
 * [Device Capability Coverage](#device-capability-coverage)
 * [CLI Reference](#cli-reference)
@@ -107,7 +110,7 @@ cd hackrfpy
 # hackrfpy. Writes uv.lock + .python-version.
 uv sync
 
-# add plotting deps (matplotlib + PyQt5) when running the examples
+# add plotting deps (matplotlib) when running the examples
 uv sync --extra plotting
 ```
 
@@ -148,14 +151,14 @@ If that prints a board (or at least runs), the binaries are reachable. If it is 
 
 The library itself depends only on **numpy**. It shells out to the `hackrf-tools` binaries (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management tools), which are a **system dependency**, not a pip one. There is no serial port and no `pyserial` involved — the HackRF presents as a USB device the binaries talk to.
 
-The plotting examples additionally need matplotlib and PyQt5, grouped under the optional `[plotting]` extra:
+The plotting examples additionally need matplotlib, grouped under the optional `[plotting]` extra:
 
 ```bash
 pip install nvnapython              # (illustrative) library only
 pip install "hackrfpy[plotting]"    # library + example plotting deps
 ```
 
-On Linux, `PyQt5` is the matplotlib backend used to draw the example figures and must be installed to run them; on many Windows machines it is not required. Install it if in doubt.
+matplotlib draws the example figures using a native GUI backend (TkAgg on Windows and most platforms, which ships with Python — no extra install). If a live window doesn't appear, your matplotlib may have selected a non-interactive backend; set one explicitly with the `MPLBACKEND=TkAgg` environment variable before running.
 
 Python 3.11+ is required (the library uses `tomllib` and modern typing). The examples default to common ISM/broadcast bands but take frequency arguments for other ranges.
 
@@ -192,7 +195,15 @@ hackRF_python/                  repo root (this README, CITATION, etc.)
 │   │   ├── capture_to_file.py
 │   │   ├── scan_then_capture.py
 │   │   ├── sweep_collect.py
-│   │   └── waterfall_realtime.py
+│   │   ├── waterfall_realtime.py
+│   │   ├── waterfall_persistent.py  single-freq FFT waterfall (persistent RX)
+│   │   ├── device_explorer.py       detect + identify + capabilities (read-only)
+│   │   ├── power_meter.py           live dBFS meter via capture_callback
+│   │   ├── persistent_capture.py    multi-segment capture, one process
+│   │   ├── benchmark.py             measure decode/throughput/latency
+│   │   ├── calibrate.py             calibration workflow (Levels 2-3)
+│   │   ├── collect_sample_data.py   real sample-data collector (read-only)
+│   │   └── sample_data/             committed real recordings + SigMF + README
 │   └── tests/
 │       ├── conftest.py           cross-platform stub-binary factory
 │       ├── fixtures/             frozen hackrf_info / sweep / iq samples
@@ -248,11 +259,13 @@ uv run pytest -m hardware
 uv run pytest --cov=hackrfpy --cov-report=term-missing
 ```
 
-> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. If a stray `.venv` appears somewhere unexpected, you ran it from the wrong directory.
+> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. **Run *scripts* the same way** — `uv run python tests/collect_real_data.py ...`, not bare `python ...`. Bare `python` can pick up a different activated `.venv` (for example one at the repo root, outside the `hackrfpy/` project dir) that doesn't have the project's dependencies installed, producing a confusing `ModuleNotFoundError: No module named 'numpy'` even though numpy is declared. If you see uv warn that `VIRTUAL_ENV ... does not match the project environment`, that's the mismatch — prefer `uv run` so the right environment is always used.
 
 The suite is split into hardware-free tests and tests marked `@pytest.mark.hardware`, which auto-skip when no board is detected. Hardware detection is intentionally **not cached**, so you can plug/unplug between runs.
 
 **A note on cross-platform coverage:** the process-lifecycle tests (the riskiest code) use **cross-platform stub binaries**, not bash scripts, so they run on Windows — the platform this library targets. Stubs are generated by a factory in `conftest.py` that writes a small Python program plus a launcher (`.bat` on Windows, a shebang'd file on POSIX). This matters because the Windows interrupt path (`CTRL_BREAK_EVENT`, used to stop a running `hackrf_transfer`) is otherwise untested on the exact platform where it must work. Run `pytest tests/test_lifecycle_xplat.py` on Windows to prove the reap/stop machinery before attaching hardware.
+
+**Hardware-validated parsing.** The parsers (`parse_info`, `parse_sweep_line`, IQ decode) are tested against frozen *verbatim output from a real HackRF One* — see `tests/fixtures/*_real.*` and `tests/test_real_output.py`. Collecting that real output surfaced behaviors no synthetic fixture had: a git-style tools version with no year, a field whose value sits on an indented continuation line, trailing free-text USB warnings, and **out-of-order sweep segments**. The hardware-marked tests (`test_hardware.py`) pass against a connected board. You can regenerate the real fixtures yourself with `tests/collect_real_data.py` (read-only).
 
 
 ## Error Handling
@@ -460,6 +473,52 @@ fs = meta["global"]["core:sample_rate"]
 fc = meta["captures"][0]["core:frequency"]
 ```
 
+### Sample Data (no board required)
+
+The repo ships **real recordings** under `examples/sample_data/` so you can try
+the library — and downstream signal processing — without owning a HackRF. Each
+`.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs and a
+provenance README noting the firmware/tools that produced them.
+
+```python
+from hackrfpy import load_iq, read_sigmf_meta
+iq = load_iq("examples/sample_data/fm_2Msps.iq")
+meta = read_sigmf_meta("examples/sample_data/fm_2Msps.iq")
+```
+
+To collect your own (read-only; never transmits), use the sample collector. It
+preflights for a board, then captures real IQ + sweep data per band with SigMF
+metadata:
+
+```bash
+uv run python examples/collect_sample_data.py --band fm --band ism433
+```
+
+Defaults are kept small (0.5 s at 2 Msps) so they can live in the repo; use
+`--seconds` / `--sample-rate` for larger local datasets. This is distinct from
+`tests/collect_real_data.py`, which freezes tiny verbatim slices as *parser test
+fixtures* rather than usable sample datasets.
+
+### Runnable Examples
+
+The `examples/` directory has end-to-end scripts you can run against a board (all read-only except where noted):
+
+| Script | What it shows |
+|---|---|
+| `device_explorer.py` | The "first thing you run": `detect` + `identify` + `features`, reporting board, firmware, capabilities, and any device warnings. |
+| `capture_to_file.py` | Bounded capture to a file with a SigMF sidecar, then read it back. |
+| `power_meter.py` | Live dBFS power meter at one frequency via `capture_callback` — the callback API on a real stream, with the gain-normalized relative reading. |
+| `scan_then_capture.py` | Sweep a band, find the strongest bin, then capture there — a pipeline the class expresses that CLI tools can't. |
+| `sweep_collect.py` | One sweep across a band saved to CSV. |
+| `waterfall_realtime.py` | Live spectrum waterfall (needs the `[plotting]` extra). |
+| `waterfall_persistent.py` | Single-frequency FFT waterfall over time, driven by a persistent receiver — the complement to the sweep waterfall (one channel evolving vs. a wide band). Needs the `[plotting]` extra. |
+| `persistent_capture.py` | Collect many segments at one frequency from a single long-lived process (amortizes startup). |
+| `benchmark.py` | Measure decode throughput, sustained-rate drop behavior, and callback latency on your hardware. |
+| `calibrate.py` | Calibration workflow (Levels 2–3): derive an absolute-ish `offset_db` from a known reference and/or a frequency-response curve, saved to `calibration.json`. |
+| `collect_sample_data.py` | Collect real sample datasets into `examples/sample_data/`. |
+
+Run any of them through uv so the project environment is used, e.g. `uv run python examples/device_explorer.py`.
+
 
 ## Method Reference
 
@@ -488,17 +547,45 @@ The `HackRF` class is composed from mixins. Methods build a `hackrf-tools` comma
 * **Signature:** `capture_stream(freq, sample_rate, **kwargs)`
 * **Returns:** a context manager yielding decoded `complex64` blocks; reaps `hackrf_transfer` on exit.
 
+#### `capture_callback`
+* **Signature:** `capture_callback(freq, sample_rate, on_block, *, max_samples=None, max_blocks=None, **kwargs)`
+* **Returns:** total samples delivered.
+* **Notes:** callback-style receive — `on_block(iq, n_so_far)` fires with each decoded `complex64` block as it streams; return `False` to stop. This is the ergonomic analog of libhackrf's RX callback (the loop is inverted so calling code resembles the C-binding libraries), riding the same subprocess stream as `capture_stream`. The child is always reaped on exit. Stops on `False`, on `max_samples`/`max_blocks`, or when the source ends.
+
+#### `scan_frequencies`
+* **Signature:** `scan_frequencies(freqs, sample_rate, num_samples, *, on_capture=None, **kwargs)`
+* **Returns:** `{freq: complex64}` dict, or `None` if `on_capture` is given.
+* **Notes:** sequentially captures `num_samples` at each frequency, retuning between them. Makes multi-frequency capture one call. **Not gapless** — each retune is a fresh `hackrf_transfer` with a short re-open (the binary can't retune mid-stream); pass `on_capture(freq, iq)` to process-and-discard instead of holding every array.
+
+#### `open_receiver`
+* **Signature:** `open_receiver(freq, sample_rate, *, lna=16, vga=20, amp=False, baseband_bw=None, read_samples=131072)`
+* **Returns:** a `PersistentReceiver` (use as a context manager).
+* **Notes:** opens **one long-lived** `hackrf_transfer` you drain in segments, so you pay the ~startup cost **once** instead of per capture — the efficient path for collecting many segments over time. **Fixed-frequency by design** (the binary can't retune mid-stream); for multiple frequencies use `scan_frequencies` or `monitor_frequencies`. The receiver offers `read(n)` (exactly *n* `complex64`), `blocks()` (iterate raw decoded blocks), and `callback(on_block, max_samples=)`. The child is reaped on `__exit__` and registered on the atexit backstop. `read_samples` tunes the stdout read granularity (larger = higher sustained throughput).
+
+```python
+with h.open_receiver(100e6, 8e6) as rx:
+    a = rx.read(1_000_000)      # exact count
+    b = rx.read(1_000_000)      # again, NO new process spin-up
+    for block in rx.blocks():   # or iterate decoded blocks
+        ...
+```
+
 ### Sweep
 
 #### `sweep`
 * **Builds:** `hackrf_sweep -f <lo:hi MHz> -l <lna> -g <vga> -a <0|1> [-w <bin_hz>] [-1] [-N <n>]`
 * **Signature:** `sweep(f_min_hz, f_max_hz, *, bin_width=None, lna=16, vga=20, amp=False, one_shot=False, num_sweeps=None, print_cmd=False)`
 * **Returns:** a generator of parsed rows: `{date, time, hz_low, hz_high, bin_width, num_samples, db: [...]}`. `None` for blank/garbled lines (filtered out).
-* **Notes:** band edges are taken in integer MHz; sub-MHz edges are snapped and a warning is printed. A single sweep over a wide band arrives as multiple rows sharing one timestamp.
+* **Notes:** band edges are taken in integer MHz; sub-MHz edges are snapped and a warning is printed. A single sweep over a wide band arrives as multiple rows sharing one timestamp. **Real `hackrf_sweep` does not emit segments in frequency order** — it interleaves them (e.g. 88, 98, 93, 103 MHz). To reconstruct a contiguous spectrum, group rows by timestamp and sort segments by `hz_low`; never assume the rows arrive low-to-high.
 
 #### `sweep_collect`
 * **Signature:** `sweep_collect(f_min_hz, f_max_hz, num_sweeps=1, **kwargs)`
 * **Returns:** a list (bounded — relies on `-N` terminating the sweep).
+
+#### `monitor_frequencies`
+* **Signature:** `monitor_frequencies(freqs_hz, *, span_hz=2_000_000, duration=None, on_update=None, lna=16, vga=20, amp=False)`
+* **Returns:** a list of `{freq_hz: power_db}` dicts (one per sweep pass), or `None` if `on_update` is given.
+* **Notes:** watch **power over time** at several frequencies, backed by `hackrf_sweep`'s fast internal retuning. Deliberately separate from `scan_frequencies`: that one returns **IQ samples** (per-frequency captures); this returns **power** (spectrum bins) and never yields IQ. Use it for "is there activity on these channels?" monitoring. `on_update(update)` returning `False` stops it.
 
 #### `sweep_stream`
 * **Signature:** `sweep_stream(f_min_hz, f_max_hz, **kwargs)`
@@ -585,12 +672,13 @@ Modes (`-m manual|frequency|time`), port assignment (`-a`/`-b`), frequency routi
 
 ```python
 h = HackRF()
-h.clock("-r")            # read clock configuration
-h.clock("-o", "1")       # enable clock output
-h.clock("-i")            # read clock input status
+h.clock("-r", "3")       # read settings for clock 3 (CLKOUT); -r needs a clock num
+h.clock("-a")            # read settings for ALL clocks
+h.clock("-i")            # get CLKIN status
+h.clock("-o", "1")       # enable CLKOUT
 ```
 
-Refer to `hackrf_clock -h` for the supported arguments on your tools version (the flag set has varied across releases).
+Note that `-r` requires a clock number (e.g. `-r 3`); calling `clock("-r")` alone prints the tool's usage rather than reading anything. Refer to `hackrf_clock -h` for the full set on your tools version (it has varied across releases — newer builds add HackRF Pro P1/P2 connector signal selection).
 
 #### Debug register access — `debug`
 
@@ -633,6 +721,18 @@ The `confirm=True` requirement exists because flashing firmware is the single mo
 | `parse_info(text)` (staticmethod) | `hackrf_info` text → dict. |
 | `parse_sweep_line(line)` (staticmethod) | one `hackrf_sweep` CSV row → dict, or `None`. |
 | `parse_freq(txt)` | `"433.92M"`, `"1.09G"`, `"2.5k"`, `"100MHz"`, or plain Hz → float Hz. Module-level. |
+
+### Power and Relative Calibration
+
+The HackRF is **not a calibrated instrument** — its raw dBFS amplitude is relative to ADC full scale, not power at the antenna, and it depends on the gain you set. These helpers (Level 1) make readings *consistent*; turning them into approximate dBm (Levels 2–3) is a hardware-and-reference workflow shown in `examples/calibrate.py`.
+
+| Method | Purpose |
+|---|---|
+| `power_dbfs(iq)` | mean power of a `complex64` block in dBFS (≤ 0; raw, uncalibrated). |
+| `gain_db(lna, vga, amp)` | total RX gain through the chain in dB. The quantity that makes a raw dBFS reading ambiguous. |
+| `relative_power_db(iq_or_dbfs, *, lna=, vga=, amp=, offset_db=0, freq_hz=, freq_correction=)` | gain-normalized power: subtracts the gain chain so readings at *different gains are comparable*. Gains default from `last_params`. Pass `offset_db` (from a calibration run) to approximate dBm, and a `freq_correction(freq)→dB` callable to flatten the front-end response. |
+
+The key property: the **same physical signal reads the same `relative_power_db` value regardless of gain**, where raw dBFS would shift by the gain delta. The library does only pure math here — it never invents reference data or claims a dBm it can't back up. To derive `offset_db` (feed a known power) or a `freq_correction` curve (sweep a flat source), run `examples/calibrate.py`; it saves a `calibration.json` you feed back in.
 
 ### Mode, Validation, and Feedback
 
