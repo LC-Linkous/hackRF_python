@@ -164,6 +164,26 @@ class CaptureMixin:
             return iq, self.last_params
         return iq
 
+    def open_receiver(self, freq, sample_rate, *, lna=16, vga=20, amp=False,
+                      baseband_bw=None, read_samples=131072):
+        # Open a PERSISTENT fixed-frequency receiver: one long-lived
+        # hackrf_transfer you drain in segments over time, so you don't pay the
+        # ~1-2 s process spin-up per capture. Use as a context manager:
+        #
+        #   with h.open_receiver(100e6, 8e6) as rx:
+        #       a = rx.read(1_000_000)     # exact sample count
+        #       b = rx.read(1_000_000)     # again, no new process
+        #       for blk in rx.blocks(): ...      # or raw decoded blocks
+        #
+        # FIXED-FREQUENCY by design -- hackrf_transfer can't retune mid-stream.
+        # For multiple frequencies use scan_frequencies (IQ per freq) or
+        # monitor_frequencies (sweep-backed power). The child is reaped on exit
+        # and registered on the atexit backstop.
+        from .._receiver import PersistentReceiver
+        return PersistentReceiver(self, freq, sample_rate, lna=lna, vga=vga,
+                                  amp=amp, baseband_bw=baseband_bw,
+                                  read_samples=read_samples)
+
     def capture_stream(self, freq, sample_rate, **k):
         # Context manager wrapping the live stdout stream so the receiving
         # hackrf_transfer is ALWAYS reaped on exit, even on exception:

@@ -84,6 +84,67 @@ class SweepMixin:
         k.pop("num_sweeps", None)
         return list(self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k))
 
+    def monitor_frequencies(self, freqs_hz, *, span_hz=2_000_000, duration=None,
+                            on_update=None, lna=16, vga=20, amp=False):
+        # Watch POWER over time at several frequencies, backed by hackrf_sweep's
+        # fast internal hardware retuning. This is DELIBERATELY a different
+        # method from scan_frequencies():
+        #   - scan_frequencies() returns IQ SAMPLES (complex64) per frequency,
+        #     via separate hackrf_transfer captures (re-open gap between each).
+        #   - monitor_frequencies() returns POWER (dB) per frequency over time,
+        #     via one continuous hackrf_sweep. No IQ -- spectrum bins only.
+        # Use this for "is there activity on these channels?" monitoring; use
+        # scan_frequencies for "give me the samples at each frequency."
+        #
+        # Yields dicts: {freq_hz: power_db, ...} once per sweep pass, mapping
+        # each requested frequency to the dB of the sweep bin covering it.
+        # Runs until `duration` seconds elapse, on_update returns False, or the
+        # caller stops iterating (the underlying sweep is reaped on exit).
+        import time as _time
+        lo = min(freqs_hz) - span_hz
+        hi = max(freqs_hz) + span_hz
+        t0 = _time.time()
+
+        def _nearest_power(rows_by_low, f):
+            # find the sweep segment whose [hz_low, hz_high) covers f, return
+            # the mean dB of that segment's bins (a simple power proxy)
+            for low in sorted(rows_by_low):
+                r = rows_by_low[low]
+                if r["hz_low"] <= f < r["hz_high"]:
+                    db = r["db"]
+                    return sum(db) / len(db) if db else float("-inf")
+            return None
+
+        from .._stream_ctx import StreamCtx
+        results = []
+        stopped = False
+        with StreamCtx(self.sweep(lo, hi, lna=lna, vga=vga, amp=amp)) as gen:
+            rows_by_low = {}
+            last_time = None
+            for row in gen:
+                if last_time is not None and row["time"] != last_time and rows_by_low:
+                    update = {f: _nearest_power(rows_by_low, f) for f in freqs_hz}
+                    if on_update is not None:
+                        if on_update(update) is False:
+                            stopped = True
+                            break
+                    else:
+                        results.append(update)
+                    rows_by_low = {}
+                    if duration is not None and _time.time() - t0 >= duration:
+                        break
+                rows_by_low[row["hz_low"]] = row
+                last_time = row["time"]
+            # flush the final buffered pass (stream ended before its timestamp
+            # rolled over) -- unless we were explicitly stopped by on_update
+            if rows_by_low and not stopped:
+                update = {f: _nearest_power(rows_by_low, f) for f in freqs_hz}
+                if on_update is not None:
+                    on_update(update)
+                else:
+                    results.append(update)
+        return None if on_update is not None else results
+
     def sweep_to_file(self, f_min_hz, f_max_hz, out, *, binary=False,
                       inverse_fft=False, bin_width=None, lna=16, vga=20,
                       amp=False, one_shot=False, num_sweeps=None,

@@ -438,7 +438,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # The device-I/O choke point
     # =================================================================
     def _run(self, argv, *, mode="blocking", duration=None,
-             text=False, check=True, print_cmd=False, kind="rx"):
+             text=False, check=True, print_cmd=False, kind="rx",
+             read_samples=65536):
         # argv: full command list whose [0] is a TOOLS key, e.g.
         #       ["transfer", "-r", "out.iq", ...]; resolved to a real path here.
         #
@@ -464,7 +465,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         self.print_message("[*] exec: " + " ".join(resolved))
 
         if mode == "stream":
-            return self._stream(resolved, text=text)
+            return self._stream(resolved, text=text, read_samples=read_samples)
         if mode == "handle":
             proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
@@ -517,10 +518,15 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
             proc.terminate()
             return proc.communicate()
 
-    def _stream(self, resolved, text=False):
+    def _stream(self, resolved, text=False, read_samples=65536):
         # Generator twin of _run. Launch, yield stdout as it arrives, clean up
         # on the caller breaking out (GeneratorExit) so we never leave a
         # transmitting/receiving process orphaned.
+        #
+        # read_samples sets the stdout read granularity (in I/Q samples). Bigger
+        # = fewer syscalls / higher sustained throughput; smaller = lower
+        # per-block latency. The default 65536 (128 KB) is a balance; the
+        # persistent receiver and benchmark can raise it to push sustained rate.
         #
         # stderr is drained continuously by a daemon thread (capped tail) --
         # an undrained PIPE eventually fills and blocks the child. If the
@@ -559,7 +565,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 # until a full 128 KB accumulated. Cap the request so we never
                 # split an I/Q pair across yields.
                 while True:
-                    chunk = proc.stdout.read1(C.BYTES_PER_SAMPLE * 65536)
+                    chunk = proc.stdout.read1(C.BYTES_PER_SAMPLE * read_samples)
                     if not chunk:
                         break
                     yield chunk
