@@ -205,3 +205,29 @@ def test_operacake_list_runs():
     out = h.operacake_list()
     text = out[0] if isinstance(out, tuple) else str(out)
     assert isinstance(text, str)
+
+
+@pytest.mark.hardware
+def test_monitor_frequencies_real():
+    # sweep-backed power monitoring across two real frequencies, one pass
+    h = HackRF()
+    updates = []
+    h.monitor_frequencies([100_000_000, 433_920_000], span_hz=3_000_000,
+                           on_update=lambda u: (updates.append(u), False)[1])
+    assert updates, "expected at least one monitor update"
+    u = updates[0]
+    assert set(u.keys()) == {100_000_000, 433_920_000}
+
+
+@pytest.mark.hardware
+def test_persistent_receiver_amortizes_startup():
+    # the persistent receiver should serve multiple reads from ONE process,
+    # paying the spin-up once. Verify exact counts come back on real hardware.
+    h = HackRF()
+    with h.open_receiver(RX_FREQ, RX_RATE) as rx:
+        a = rx.read(100_000)
+        b = rx.read(100_000)
+    assert len(a) == 100_000
+    assert len(b) == 100_000
+    assert not np.all(a == 0)        # real signal
+    assert a.dtype == np.complex64
