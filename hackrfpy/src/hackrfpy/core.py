@@ -601,8 +601,67 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         iq /= 128.0          # normalize int8 full-scale to ~[-1, 1)
         return iq
 
-    def load_iq(self, path, count=None, offset_samples=0):
-        # Instance convenience for module-level load_iq (below).
+    # ---- power / relative calibration (Level 1) ----------------------------
+    # These turn the device's arbitrary dBFS amplitude into something that is
+    # at least CONSISTENT across gain settings (and, with a user-supplied
+    # offset, approximately absolute). They are PURE math on values you give
+    # them -- the library never invents reference data or claims a calibrated
+    # dBm figure it cannot honestly produce. Producing the offset and any
+    # frequency-correction table is a hardware+reference workflow; see
+    # examples/calibrate.py.
+
+    @staticmethod
+    def power_dbfs(iq):
+        # Mean power of a complex64 block in dBFS (dB relative to full scale).
+        # 0 dBFS == |amplitude| 1.0 (ADC full scale). Always <= 0 for real
+        # captures. This is the raw, UNCALIBRATED reading.
+        if len(iq) == 0:
+            return float("-inf")
+        power = float(np.mean((iq.real.astype(np.float64) ** 2
+                               + iq.imag.astype(np.float64) ** 2)))
+        return 10.0 * np.log10(power + 1e-20)
+
+    @staticmethod
+    def gain_db(lna=0, vga=0, amp=False):
+        # Total RX gain through the chain in dB: LNA (IF) + VGA (baseband) +
+        # the fixed ~14 dB front-end amp if enabled. This is the quantity that
+        # makes a raw dBFS reading ambiguous -- the SAME signal reads ~36 dB
+        # different between min and max gain.
+        return float(lna) + float(vga) + (C.AMP_DB if amp else 0.0)
+
+    def relative_power_db(self, iq_or_dbfs, *, lna=None, vga=None, amp=None,
+                          offset_db=0.0, freq_hz=None, freq_correction=None):
+        # Gain-normalized power: subtract the gain chain so readings taken at
+        # DIFFERENT gain settings are directly comparable. This is the Level 1
+        # relative calibration -- still not absolute dBm, but consistent.
+        #
+        #   value = dBFS - total_gain_dB + offset_db [- freq_correction(freq)]
+        #
+        # iq_or_dbfs:   a complex64 block (its power is measured) OR a dBFS float
+        # lna/vga/amp:  gain settings; if omitted, taken from last_params
+        # offset_db:    your single-point reference offset (Level 3), if any.
+        #               With a correct offset this approximates dBm; without
+        #               one it is relative dB (still gain-consistent).
+        # freq_hz + freq_correction: optional per-frequency correction. If you
+        #               pass a callable freq_correction(freq_hz)->dB (e.g. built
+        #               from a sweep of a flat source, see examples/calibrate.py),
+        #               it is subtracted to flatten the front-end response
+        #               (Level 2). The library ships NO built-in curve, because
+        #               front-end response varies per unit.
+        dbfs = (iq_or_dbfs if isinstance(iq_or_dbfs, (int, float))
+                else self.power_dbfs(iq_or_dbfs))
+        lp = self.last_params or {}
+        if lna is None:
+            lna = lp.get("lna_gain", lp.get("lna", 0))
+        if vga is None:
+            vga = lp.get("vga_gain", lp.get("vga", 0))
+        if amp is None:
+            amp = lp.get("amp", False)
+        value = dbfs - self.gain_db(lna, vga, amp) + float(offset_db)
+        if freq_hz is not None and freq_correction is not None:
+            value -= float(freq_correction(freq_hz))
+        return value
+
         return load_iq(path, count=count, offset_samples=offset_samples)
 
     def estimate_capture(self, sample_rate, num_samples=None, duration=None,
