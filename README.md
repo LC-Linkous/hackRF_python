@@ -1,15 +1,20 @@
 # hackRF_python
 
+[![PyPI version](https://badge.fury.io/py/hackrfpy.svg)](https://badge.fury.io/py/hackrfpy)
+[![Python versions](https://img.shields.io/pypi/pyversions/hackrfpy.svg)](https://pypi.org/project/hackrfpy/)
+[![PyPI - Wheel](https://img.shields.io/pypi/wheel/hackrfpy.svg)](https://pypi.org/project/hackrfpy/)
+[![Downloads](https://static.pepy.tech/badge/hackrfpy)](https://pepy.tech/project/hackrfpy)
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-[![Python versions](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 
-## AN UNOFFICIAL Python CLI + scripting wrapper for the HackRF One
+
+
+## An UNOFFICIAL Python CLI + scripting wrapper for the HackRF One
 
 A non-GUI Python wrapper and command-line tool for the [HackRF One](https://greatscottgadgets.com/hackrf/one/) software-defined radio.
 
-This repository uses official resources and documentation but is **NOT** endorsed by Great Scott Gadgets or the HackRF project. See the [references](#references) section for further reading. See the [official HackRF documentation](https://hackrf.readthedocs.io/) and the [GitHub project](https://github.com/greatscottgadgets/hackrf) for authoritative device behavior.
+This repository uses official resources and documentation but is **NOT** endorsed by Great Scott Gadgets or the HackRF project. See the [references](#references) section for further reading. See the [official HackRF documentation](https://hackrf.readthedocs.io/) and the [GitHub project](https://github.com/greatscottgadgets/hackrf) for official documentation of device behavior.
 
-Unlike libraries that bind to `libhackrf` through C extensions, this library **shells out to the standard `hackrf-tools` command-line binaries** (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management tools). There are no compiled bindings to build, which is what makes it practical to install and run on Windows. The cost of that choice is that the host `hackrf-tools` binaries must be installed and reachable; see [Requirements](#requirements).
+This is a library designed to work on Windows. Historically, that has been difficult, but there have been improvements the last few years. There still exists a gap with some functional needs and installer streamlining. Unlike libraries that bind to `libhackrf` through C extensions, this library interfaces directly with the standard `hackrf-tools` command-line binaries (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management tools). There are no compiled bindings to build, which is what makes it practical to install and run on Windows. The cost of that choice is that the host `hackrf-tools` binaries must be installed and reachable; see [Requirements](#requirements).
 
 This README documents the library's methods, the operating envelope it enforces, and the exact `hackrf-tools` invocation each method builds, with runnable examples in the `examples/` directory. While the library does argument validation, it is **not exhaustive**, and the device and binaries do their own checks. It is strongly advised to read the official documentation before scripting your HackRF, especially before transmitting. **Transmitting into the wrong load, band, or power level can damage your device, connected equipment, or violate radio regulations.**
 
@@ -65,27 +70,23 @@ The primary GitHub: [https://github.com/LC-Linkous/hackRF_python](https://github
 
 ## The HackRF One Device
 
-The [HackRF One](https://greatscottgadgets.com/hackrf/one/) is a wide-band, half-duplex software-defined radio from Great Scott Gadgets. It tunes from 1 MHz to 6 GHz, samples at up to 20 Msps, and is **half-duplex** — it receives or transmits, but never both at once. It is an 8-bit device: samples are quantized to signed 8-bit I and Q, which is the native format this library reads and writes.
+The [HackRF One](https://greatscottgadgets.com/hackrf/one/) is a wide-band, half-duplex software-defined radio from Great Scott Gadgets. It tunes from 1 MHz to 6 GHz and samples at up to 20 Msps (2 Msps floor). It is **half-duplex**  (it receives or transmits, but never both at once) and **8-bit**: samples are quantized to signed 8-bit I and Q, interleaved. That interleaved int8 I/Q is the native format this library reads and writes, on both the receive and transmit paths.
 
-"Half-duplex" and "8-bit" are not limitations to work around; they are the device, and the library's design follows from them. The receive path delivers interleaved signed 8-bit I/Q. The transmit path consumes the same format. There is one radio, so the library carries an explicit operating mode (RX or TX) with a deliberate gate before transmit (see [Operating Modes and the TX Gate](#operating-modes-and-the-tx-gate)).
+Because there is one radio and it can't do both directions at once, the library carries an explicit operating mode (RX or TX), with a deliberate gate before transmit — see [Operating Modes and the TX Gate](#operating-modes-and-the-tx-gate).
 
-Official documentation is at [https://hackrf.readthedocs.io/](https://hackrf.readthedocs.io/), and the firmware/tools source is at [https://github.com/greatscottgadgets/hackrf](https://github.com/greatscottgadgets/hackrf). The official docs track firmware and tooling more closely than this repo will; read them before driving the hardware experimentally.
+Official documentation is at [hackrf.readthedocs.io](https://hackrf.readthedocs.io/); the firmware and tools source is at [github.com/greatscottgadgets/hackrf](https://github.com/greatscottgadgets/hackrf). Those track firmware and tooling more closely than this repo will — read them before driving the hardware experimentally.
 
 
 ## How This Library Works (Architecture)
 
-This is the part worth understanding before anything else, because it explains every design choice downstream.
+**The library does not talk to the HackRF directly. It runs the `hackrf-tools` binaries as subprocesses and manages their input, output, and lifecycle.** When you call `h.capture(...)`, the library builds a `hackrf_transfer` command line, launches it, and — depending on how you asked for the data — waits for it, times it, streams its stdout, or hands you a controllable process handle.
 
-**The library does not talk to the HackRF directly. It runs the `hackrf-tools` binaries as subprocesses and manages their input, output, and lifecycle.** When you call `h.capture(...)`, the library builds a `hackrf_transfer` command line, launches it, and (depending on how you asked for the data) either waits for it, times it, streams its stdout, or hands you a controllable process handle.
+Wrapping the binaries instead of binding the C library shapes everything downstream:
 
-That single decision — wrap the binaries, don't bind the C library — shapes everything:
-
-* **No compiled dependencies.** There is no `libhackrf` to link, no build step, no wheel that has to match your platform's C toolchain. This is why it runs on Windows without ceremony. The trade is that the binaries are a *system* dependency you install separately.
-* **The risky code is process lifecycle, not DSP.** The hard parts of this library are: draining a child's stdout/stderr pipes without deadlocking, stopping a running `hackrf_transfer` *cleanly* (so a recording isn't truncated mid-sample-pair), reaping a child when a streaming consumer breaks out of its loop, and making sure a script that dies doesn't leave a transmitter running. Most of the test suite exists to prove those paths.
-* **Everything funnels through one method.** Internally, every binary invocation goes through `_run(argv, mode=...)`. The `mode` selects the lifecycle: `blocking` (run to completion), `timed` (run for N seconds then stop), `handle` (hand back a controllable process), or `stream` (yield output as it arrives). Centralizing this is what makes the lifecycle testable.
-* **The library yields `complex64`; it does not interpret samples.** Decoding interleaved int8 to normalized `complex64` is the boundary. Filtering, demodulation, FFTs, waterfishing the spectrum — that is deliberately *not* here. See [project_summary.md](project_summary.md) for the split between this project (transport + control) and the planned signal-processing project.
-
-If you only remember one thing: **this library moves bytes and manages processes around a radio. It does not process signals.**
+* **No compiled dependencies.** This is the largest change from previous versions of this tool and other Python libraries. There is no `libhackrf` to link, no build step, and no wheel that has to match your platform's C toolchain. The tradeoff is that the binaries for the SDR are a *system* dependency you install separately, but it is what lets this library run on Windows without managing multiple installs.
+* **The library manages the hackrf-tools child processes.** It handles draining stdout/stderr without deadlocking, stopping hackrf_transfer cleanly so recordings aren't truncated mid-sample-pair, reaping children when a consumer exits early, and shutting down the transmitter if the script dies. Tests cover these paths.
+* **Everything funnels through one method.** Every binary invocation goes through `_run(argv, mode=...)`. The `mode` selects the lifecycle: `blocking` (run to completion), `timed` (run N seconds then stop), `handle` (return a controllable process), or `stream` (yield output as it arrives). Centralizing this is what makes the lifecycle testable.
+* **The library yields `complex64`; it does not interpret samples.** Decoding interleaved int8 to normalized `complex64` is the boundary. Filtering, demodulation, FFTs, waterfalls — deliberately *not* here. See [project_summary.md](project_summary.md) for the split between this project (transport + control) and the planned signal-processing project.
 
 
 ## Library Usage
@@ -132,11 +133,21 @@ pip install -e .                   # editable, library only
 
 ### Installing hackrf-tools
 
-This library is useless without the `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level.
 
-* **Windows:** download the prebuilt `hackrf-tools` from the [Great Scott Gadgets releases](https://github.com/greatscottgadgets/hackrf/releases) (or via a package manager that provides them). Either put the folder on your `PATH`, or point the library at it with `HackRF(tools_dir=r"C:\path\to\hackrf-tools")`. The library resolves `hackrf_transfer.exe` etc. by extension, so a bare-name `PATH` entry is not required.
-* **Linux:** `sudo apt install hackrf` (Debian/Ubuntu) or your distribution's equivalent installs the tools and udev rules. You may need to be in the `plugdev` group for non-root USB access.
+### Installing hackrf-tools
+
+This library is requires the  `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level. This package cannot install them.
+
+Only the command line tools are required. (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management utilities). 
+
+* **Linux:** `sudo apt install hackrf` (Debian/Ubuntu) or your distribution's equivalent. This installs the tools and the udev rules; you may need to be in the `plugdev` group for non-root USB access.
 * **macOS:** `brew install hackrf`.
+* **Windows:** Great Scott Gadgets publishes the tools as CI build artifacts for some workflow runs. You do **not** need GNU Radio, SoapySDR, or a full SDR distribution. If you have radioconda installed, then you have the binaries, and GNU Radio and a full conda environment you don't need for this library. Download the prebuilt `hackrf-tools` from the [Great Scott Gadgets releases](https://github.com/greatscottgadgets/hackrf/releases) (or via a package manager that provides them). 
+
+    1. Open the [Actions tab](https://github.com/greatscottgadgets/hackrf/actions) of the HackRF repo.
+    2. Click a recent successful workflow run (one with a green check).
+    3. Under **Artifacts** on the run page (files at the bottom of the page, link at the top), download the Windows build — a zipped folder of the binaries.
+    4. Unzip it, then either add the folder to your `PATH` or pass it as `HackRF(tools_dir=r"C:\path\to\hackrf-tools")`. The library resolves `hackrf_transfer.exe` etc. by extension, so a bare-name `PATH` entry is not required.
 
 Verify the install before scripting:
 
