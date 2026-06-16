@@ -160,23 +160,26 @@ If that prints a board (or at least runs), the binaries are reachable. If it is 
 
 ## Requirements
 
-The library itself depends only on **numpy**. It shells out to the `hackrf-tools` binaries (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management tools), which are a **system dependency**, not a pip one. There is no serial port and no `pyserial` involved — the HackRF presents as a USB device the binaries talk to.
+## Requirements
 
-The plotting examples additionally need matplotlib, grouped under the optional `[plotting]` extra:
+The core library depends only on [numpy](https://pypi.org/project/numpy/) for sample decoding. The plotting examples additionally need matplotlib, grouped under the optional `[plotting]` extra:
 
 ```bash
-pip install nvnapython              # (illustrative) library only
-pip install "hackrfpy[plotting]"    # library + example plotting deps
+# core library only
+pip install hackrfpy
+# with the plotting example dependencies
+pip install "hackrfpy[plotting]"
 ```
 
-matplotlib draws the example figures using a native GUI backend (TkAgg on Windows and most platforms, which ships with Python — no extra install). If a live window doesn't appear, your matplotlib may have selected a non-interactive backend; set one explicitly with the `MPLBACKEND=TkAgg` environment variable before running.
+matplotlib draws the example figures using a native GUI backend (TkAgg on Windows and most platforms, which ships with Python — no extra install). If a live window doesn't appear, your matplotlib may have selected a non-interactive backend; set one explicitly with `MPLBACKEND=TkAgg` before running.
 
 Python 3.11+ is required (the library uses `tomllib` and modern typing). The examples default to common ISM/broadcast bands but take frequency arguments for other ranges.
 
+Note that this is separate from the `hackrf-tools` binaries, which are a **system** dependency installed at the OS level, not via pip — see [Installing hackrf-tools](#installing-hackrf-tools).
 
 ## Structure
 
-The public API is `from hackrfpy import HackRF`. Per-command methods live in mixin modules under `_commands/` and are composed onto the `HackRF` class in `core.py`, which holds shared state, binary resolution, the validation envelope, the `_run` process machinery, and IQ decoding. `constants.py` holds the operating envelope (frequency range, sample-rate range, gain tables, baseband filter set, the tool table) — a single source of truth that both the validation code and the test suite import, so they cannot drift apart.
+The public API is `from hackrfpy import HackRF`. Per-command methods live in mixin modules under `_commands/` and are composed onto the `HackRF` class in `core.py`, which holds shared state, binary resolution, the validation envelope, the `_run` process machinery, and IQ decoding. `constants.py` holds the operating envelope (frequency range, sample-rate range, gain tables, baseband filter set, the tool table).
 
 ```
 hackRF_python/                  repo root (this README, CITATION, etc.)
@@ -224,7 +227,7 @@ hackRF_python/                  repo root (this README, CITATION, etc.)
 
 ## The Operating Envelope
 
-Everything the library treats as a "limit" lives in `constants.py`, so there is exactly one place to edit as firmware evolves, and the tests import the same numbers they validate against. These describe the **library's checking envelope**, not live device state — editing them changes what the library accepts, not anything on the board.
+Everything the library treats as a "limit" lives in `constants.py`, so there is exactly one place to edit as firmware evolves, and the tests import the same numbers they validate against. These describe the **library's checking envelope**, not live device state. Editing them changes what the library accepts, not anything on the board.
 
 | Parameter | Value | Behavior |
 |---|---|---|
@@ -236,12 +239,12 @@ Everything the library treats as a "limit" lives in `constants.py`, so there is 
 | Front-end amp | ~14 dB, on/off | Boolean only. |
 | Baseband filter BW | discrete MAX2837 set | Auto-derived as ~0.75 × sample rate, snapped to the nearest supported value; explicit values are snapped too. |
 
-"Snap-and-notify, round down" is a deliberate honesty choice: the silicon rounds to a step regardless, so the library tells you the value you will actually get rather than pretending your exact request was honored. Gain snapping and other safety notices are printed to **stderr** regardless of the verbose setting, so they are never silently swallowed.
+Gain snapping and other safety notices are printed to **stderr** regardless of the verbose setting. This may be changed as the library is tested and made more stable.
 
 
 ## Operating Modes and the TX Gate
 
-The HackRF is half-duplex, so the library carries an explicit mode: `rx` (default) or `tx`. Receiving, capturing, and sweeping require RX mode; transmitting requires TX mode. Switching to TX is a **deliberate, one-time action** that prints a safety banner — it is not something you can do by accident in the middle of a capture call.
+The HackRF is half-duplex, so the library carries an explicit mode: `rx` (default) or `tx`. Receiving, capturing, and sweeping require RX mode; transmitting requires TX mode. Switching to TX is a **deliberate, one-time action** that prints a safety banner. That measnt it is not something you can do by accident in the middle of a capture call.
 
 ```python
 h = HackRF()
@@ -270,18 +273,18 @@ uv run pytest -m hardware
 uv run pytest --cov=hackrfpy --cov-report=term-missing
 ```
 
-> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. **Run *scripts* the same way** — `uv run python tests/collect_real_data.py ...`, not bare `python ...`. Bare `python` can pick up a different activated `.venv` (for example one at the repo root, outside the `hackrfpy/` project dir) that doesn't have the project's dependencies installed, producing a confusing `ModuleNotFoundError: No module named 'numpy'` even though numpy is declared. If you see uv warn that `VIRTUAL_ENV ... does not match the project environment`, that's the mismatch — prefer `uv run` so the right environment is always used.
+> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. **Run the scripts the same way** (such as `uv run python tests/collect_real_data.py ...`), not wih the bare `python ...`. The bare `python` call might work with some setups, but it is an easy source of error if uv creates a second virtual environment on a lower level. 
 
 The suite is split into hardware-free tests and tests marked `@pytest.mark.hardware`, which auto-skip when no board is detected. Hardware detection is intentionally **not cached**, so you can plug/unplug between runs.
 
-**A note on cross-platform coverage:** the process-lifecycle tests (the riskiest code) use **cross-platform stub binaries**, not bash scripts, so they run on Windows — the platform this library targets. Stubs are generated by a factory in `conftest.py` that writes a small Python program plus a launcher (`.bat` on Windows, a shebang'd file on POSIX). This matters because the Windows interrupt path (`CTRL_BREAK_EVENT`, used to stop a running `hackrf_transfer`) is otherwise untested on the exact platform where it must work. Run `pytest tests/test_lifecycle_xplat.py` on Windows to prove the reap/stop machinery before attaching hardware.
+**A note on cross-platform coverage:** the process-lifecycle tests (the riskiest code) use **cross-platform stub binaries**, not bash scripts, so they run on Windows, which is the platform this library targets. Stubs are generated by a factory in `conftest.py` that writes a small Python program plus a launcher (`.bat` on Windows, a shebang'd file on POSIX). This matters because the Windows interrupt path (`CTRL_BREAK_EVENT`, used to stop a running `hackrf_transfer`) is otherwise untested on the exact platform where it must work. Run `pytest tests/test_lifecycle_xplat.py` on Windows to prove the reap/stop machinery before attaching hardware.
 
-**Hardware-validated parsing.** The parsers (`parse_info`, `parse_sweep_line`, IQ decode) are tested against frozen *verbatim output from a real HackRF One* — see `tests/fixtures/*_real.*` and `tests/test_real_output.py`. Collecting that real output surfaced behaviors no synthetic fixture had: a git-style tools version with no year, a field whose value sits on an indented continuation line, trailing free-text USB warnings, and **out-of-order sweep segments**. The hardware-marked tests (`test_hardware.py`) pass against a connected board. You can regenerate the real fixtures yourself with `tests/collect_real_data.py` (read-only).
+**Hardware-validated parsing.** The parsers (`parse_info`, `parse_sweep_line`, IQ decode) are tested against included sample data in `tests/fixtures/*_real.*`. Data can be collected from real hardware with `tests/test_real_output.py`.
 
 
 ## Error Handling
 
-The library raises a **typed exception hierarchy** (rather than returning sentinel values), so importing scripts get real, catchable exceptions and the CLI maps them to clean stderr messages and exit codes.
+The library raises a **typed exception hierarchy** (rather than returning sentinel values), so importing scripts get more accurate (and catchable) exceptions and the CLI maps them to stderr messages and exit codes.
 
 | Exception | Exit code | Raised when |
 |---|---|---|
@@ -296,7 +299,7 @@ Two feedback toggles control how chatty the library is:
 * `set_verbose(True/False)` (or `HackRF(verbose=True)`) — prints status/diagnostic messages (which mode it's in, capture size estimates, what a method did).
 * `allow_out_of_spec` (or `--force` on the CLI) — downgrades a reject-by-default range error to a stderr warning instead of an exception. Use with care; it exists for the rare legitimate out-of-spec case, not as a way to silence validation.
 
-Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, MHz edge truncation on sweep) print to **stderr unconditionally** — they are never gated behind `verbose`, because a safety warning you can't see is not a warning.
+Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, MHz edge truncation on sweep) print to **stderr unconditionally**. This is not blocked by the `verbose` togggle, because these are places where the library is still not fully stable.
 
 Validation is not exhaustive, and the binaries and device do their own checks, so always consult the official documentation for valid ranges.
 
@@ -307,7 +310,7 @@ Runnable versions of these are in the `examples/` directory; the snippets here a
 
 ### Preflight: Checking Your Environment
 
-Before anything else, confirm the tools are reachable and (optionally) a board is present. `preflight()` (also available as the familiar alias `doctor()`) checks the binaries, board enumeration, free disk, the tools version, and derived feature flags.
+Before anything else, confirm the tools are reachable and (optionally) a board is present. `preflight()` (also available as the alias `doctor()`, which is popular in some domains) checks the binaries, board enumeration, free disk, the tools version, and derived feature flags.
 
 ```python
 from hackrfpy import HackRF
@@ -326,7 +329,7 @@ hrf doctor
 
 ### Detecting and Identifying Hardware
 
-The HackRF is not a serial device, so there are no COM ports to scan. `detect()` is the equivalent: it runs `hackrf_info`, confirms each enumerated board is actually a HackRF, and reports identity and firmware. It never raises for "no board" — that's a normal result you inspect.
+The HackRF is not a serial device, so there are no COM ports to scan for an autoconnect. In this library, `detect()` is the equivalent: it runs `hackrf_info`, confirms each enumerated board is actually a HackRF, and reports identity and firmware. It never raises for "no board"; that's a normal result you inspect.
 
 ```python
 from hackrfpy import HackRF
@@ -380,7 +383,9 @@ This writes `capture.iq` (interleaved int8 I/Q) and `capture.sigmf-meta` (freque
 
 ### In-Memory Capture (no file)
 
-For scripting, get samples straight back as a normalized `complex64` array — no file round-trip. This is the entry point downstream signal-processing code will lean on.
+For scripting, get samples straight back as a normalized `complex64` array. This has the benefit of no file round-trip. 
+
+In more advanced examples, this is the entry point downstream signal-processing code will lean on (not featured in this library).
 
 ```python
 from hackrfpy import HackRF
@@ -397,7 +402,7 @@ print(params["lna"])            # 24 (snapped from 30)
 
 ### Live Streaming with Clean Shutdown
 
-Stream decoded blocks as they arrive, with a context manager that **guarantees** the receiving `hackrf_transfer` is reaped on exit — including a Ctrl-C out of the loop.
+Stream decoded blocks as they arrive, with a context manager that guarantees the receiving `hackrf_transfer` is killed on exit.(including a Ctrl-C out of the loop).
 
 ```python
 from hackrfpy import HackRF
