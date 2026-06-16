@@ -133,16 +133,13 @@ pip install -e .                   # editable, library only
 
 ### Installing hackrf-tools
 
-
-### Installing hackrf-tools
-
-This library is requires the  `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level. This package cannot install them.
+This library requires the  `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level. This package cannot install them.
 
 Only the command line tools are required. (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management utilities). 
 
 * **Linux:** `sudo apt install hackrf` (Debian/Ubuntu) or your distribution's equivalent. This installs the tools and the udev rules; you may need to be in the `plugdev` group for non-root USB access.
 * **macOS:** `brew install hackrf`.
-* **Windows:** Great Scott Gadgets publishes the tools as CI build artifacts for some workflow runs. You do **not** need GNU Radio, SoapySDR, or a full SDR distribution. If you have radioconda installed, then you have the binaries, and GNU Radio and a full conda environment you don't need for this library. Download the prebuilt `hackrf-tools` from the [Great Scott Gadgets releases](https://github.com/greatscottgadgets/hackrf/releases) (or via a package manager that provides them). 
+* **Windows:** Great Scott Gadgets publishes the tools as CI build artifacts for some workflow runs. You do **not** need GNU Radio, SoapySDR, or a full SDR distribution. If you have radioconda installed, then you have the binaries, and GNU Radio and a full conda environment you don't need for this library. Download the prebuilt `hackrf-tools` from the [Great Scott Gadgets github](https://github.com/greatscottgadgets/hackrf) (or via a package manager that provides them). 
 
     1. Open the [Actions tab](https://github.com/greatscottgadgets/hackrf/actions) of the HackRF repo.
     2. Click a recent successful workflow run (one with a green check).
@@ -157,8 +154,6 @@ hackrf_info
 
 If that prints a board (or at least runs), the binaries are reachable. If it is not on your `PATH`, use `tools_dir` (Python) or `[tools].dir` in config.
 
-
-## Requirements
 
 ## Requirements
 
@@ -244,7 +239,7 @@ Gain snapping and other safety notices are printed to **stderr** regardless of t
 
 ## Operating Modes and the TX Gate
 
-The HackRF is half-duplex, so the library carries an explicit mode: `rx` (default) or `tx`. Receiving, capturing, and sweeping require RX mode; transmitting requires TX mode. Switching to TX is a **deliberate, one-time action** that prints a safety banner. That measnt it is not something you can do by accident in the middle of a capture call.
+The HackRF is half-duplex, so the library carries an explicit mode: `rx` (default) or `tx`. Receiving, capturing, and sweeping require RX mode; transmitting requires TX mode. Switching to TX is a **deliberate, one-time action** that prints a safety banner. That means it is not something you can do by accident in the middle of a capture call.
 
 ```python
 h = HackRF()
@@ -299,7 +294,7 @@ Two feedback toggles control how chatty the library is:
 * `set_verbose(True/False)` (or `HackRF(verbose=True)`) — prints status/diagnostic messages (which mode it's in, capture size estimates, what a method did).
 * `allow_out_of_spec` (or `--force` on the CLI) — downgrades a reject-by-default range error to a stderr warning instead of an exception. Use with care; it exists for the rare legitimate out-of-spec case, not as a way to silence validation.
 
-Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, MHz edge truncation on sweep) print to **stderr unconditionally**. This is not blocked by the `verbose` togggle, because these are places where the library is still not fully stable.
+Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, MHz edge truncation on sweep) print to **stderr unconditionally**. This is not blocked by the `verbose` toggle, because these are places where the library is still not fully stable.
 
 Validation is not exhaustive, and the binaries and device do their own checks, so always consult the official documentation for valid ranges.
 
@@ -403,7 +398,7 @@ print(params["lna"])            # 24 (snapped from 30)
 
 ### Live Streaming with Clean Shutdown
 
-Stream decoded blocks as they arrive, with a context manager that guarantees the receiving `hackrf_transfer` is killed on exit.(including a Ctrl-C out of the loop).
+Stream decoded blocks as they arrive, with a context manager that guarantees the receiving `hackrf_transfer` is reaped on exit.(including a Ctrl-C out of the loop).
 
 ```python
 from hackrfpy import HackRF
@@ -492,7 +487,7 @@ fc = meta["captures"][0]["core:frequency"]
 
 ### Sample Data (no board required)
 
-Ral recordings have been included under `examples/sample_data/` so the library basics can be tested without hardware. Each
+Real recordings have been included under `examples/sample_data/` so the library basics can be tested without hardware. Each
 `.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs. The README in `examples/sample_data/`notes the firmware/tools that produced the data.
 
 ```python
@@ -507,7 +502,7 @@ To collect your own (read-only; never transmits), use the sample collector. It p
 uv run python examples/collect_sample_data.py --band fm --band ism433
 ```
 
-Defaults are kept small (0.5 s at 2 Msps) so they can live in the repo; use `--seconds` / `--sample-rate` for larger local datasets. This is distinct from `tests/collect_real_data.py`, which freezes tiny verbatim slices as parser test fixtures rather than usable sample datasets.
+Defaults are kept small (0.5 s at 2 Msps, below the 8 Msps floor, fine for small samples) so they can live in the repo; use `--seconds` / `--sample-rate` for larger local datasets. This is distinct from `tests/collect_real_data.py`, which freezes tiny verbatim slices as parser test fixtures rather than usable sample datasets.
 
 ### Runnable Examples
 
@@ -734,7 +729,7 @@ The `confirm=True` requirement exists because flashing firmware is the single mo
 
 ### Power and Relative Calibration
 
-The HackRF is **not a calibrated instrument**. Its raw dBFS amplitude is relative to ADC full scale, not power at the antenna, and it depends on the gain you set. These helpers (Level 1) make readings *consistent*; turning them into approximate dBm (Levels 2–3) is a hardware-and-reference workflow shown in `examples/calibrate.py`. This calibration example is not meant to be echaustive, and the value it adds to an individual project or process is dependent on external tools.
+The HackRF is **not a calibrated instrument**. Its raw dBFS amplitude is relative to ADC full scale, not power at the antenna, and it depends on the gain you set. These helpers (Level 1) make readings *consistent*; turning them into approximate dBm (Levels 2–3) is a hardware-and-reference workflow shown in `examples/calibrate.py`. This calibration example is not meant to be exhaustive, and the value it adds to an individual project or process is dependent on external tools.
 
 | Method | Purpose |
 |---|---|
@@ -854,7 +849,7 @@ This is a brief section for anyone who jumped in a little ahead of the reading. 
 
 ### What an SDR Is (and Isn't)
 
-A software-defined radio moves the radio's "knobs" (that is, functions for for tuning, filtering, demodulation) into software. The HackRF is a *wide-band, half-duplex, 8-bit* SDR: it covers an enormous frequency range but sees one band at a time, can't receive and transmit simultaneously, and quantizes coarsely (8-bit). That makes it a superb tool for exploration, capture, and experimentation, and a poor choice when you need high dynamic range or full-duplex operation. It is not a spectrum analyzer (though `hackrf_sweep` approximates one), and it is not a vector network analyzer.
+A software-defined radio moves the radio's "knobs" (that is, functions for tuning, filtering, demodulation) into software. The HackRF is a *wide-band, half-duplex, 8-bit* SDR: it covers an enormous frequency range but sees one band at a time, can't receive and transmit simultaneously, and quantizes coarsely (8-bit). That makes it a superb tool for exploration, capture, and experimentation, and a poor choice when you need high dynamic range or full-duplex operation. It is not a spectrum analyzer (though `hackrf_sweep` approximates one), and it is not a vector network analyzer.
 
 ### Some General HackRF Notes
 
