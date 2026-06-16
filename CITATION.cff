@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "hackrfpy: An Unofficial Python CLI + Scripting Wrapper for the HackRF One"
+abstract: >-
+  A non-GUI Python wrapper and command-line tool for the HackRF One
+  software-defined radio, built on the hackrf-tools command-line binaries
+  (no libhackrf bindings required). Provides programmatic control for capture,
+  spectrum sweep, and transmit, with self-describing SigMF recordings. This is
+  an unofficial community project and is not endorsed by Great Scott Gadgets or
+  the HackRF project.
+type: software
+authors:
+  - family-names: "Linkous"
+    given-names: "Lauren"
+    orcid: "https://orcid.org/0000-0001-9945-5125"
+version: "0.1.0"
+date-released: "2026-06-15"
+license: GPL-2.0-or-later
+repository-code: "https://github.com/LC-Linkous/hackRF_python"
+url: "https://github.com/LC-Linkous/hackRF_python"
+keywords:
+  - hackrf
+  - software-defined-radio
+  - sdr
+  - python
+  - rf
+  - spectrum
+  - sigmf
+  - instrumentation
