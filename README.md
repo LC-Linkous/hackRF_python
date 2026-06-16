@@ -367,6 +367,7 @@ for board in info["boards"]:
 raw_text = h.info(raw=True)     # the verbatim hackrf_info output
 ```
 
+
 ### Bounded Capture to a File
 
 A fixed number of samples to an `.iq` file, with a SigMF metadata sidecar written alongside so the recording is self-describing.
@@ -415,7 +416,7 @@ with h.capture_stream(433.92e6, 8e6) as blocks:
 
 ### Spectrum Sweep
 
-`hackrf_sweep` emits CSV rows continuously; the library yields them parsed.
+`hackrf_sweep` emits CSV rows continuously. 
 
 ```python
 from hackrfpy import HackRF
@@ -436,7 +437,7 @@ with h.sweep_stream(88e6, 108e6) as rows:
 
 ### Scan-then-Capture Pipeline
 
-A pipeline the class can express that CLI-only tools cannot: sweep a band, find the strongest bin, capture there.
+A pipeline the class can express that CLI-only tools cannot: sweep a band, find the strongest bin, and capture there.
 
 ```python
 import numpy as np
@@ -491,10 +492,8 @@ fc = meta["captures"][0]["core:frequency"]
 
 ### Sample Data (no board required)
 
-The repo ships **real recordings** under `examples/sample_data/` so you can try
-the library — and downstream signal processing — without owning a HackRF. Each
-`.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs and a
-provenance README noting the firmware/tools that produced them.
+Ral recordings have been included under `examples/sample_data/` so the library basics can be tested without hardware. Each
+`.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs. The README in `examples/sample_data/`notes the firmware/tools that produced the data.
 
 ```python
 from hackrfpy import load_iq, read_sigmf_meta
@@ -502,18 +501,13 @@ iq = load_iq("examples/sample_data/fm_2Msps.iq")
 meta = read_sigmf_meta("examples/sample_data/fm_2Msps.iq")
 ```
 
-To collect your own (read-only; never transmits), use the sample collector. It
-preflights for a board, then captures real IQ + sweep data per band with SigMF
-metadata:
+To collect your own (read-only; never transmits), use the sample collector. It preflights for a board, then captures real IQ + sweep data per band with SigMF metadata:
 
 ```bash
 uv run python examples/collect_sample_data.py --band fm --band ism433
 ```
 
-Defaults are kept small (0.5 s at 2 Msps) so they can live in the repo; use
-`--seconds` / `--sample-rate` for larger local datasets. This is distinct from
-`tests/collect_real_data.py`, which freezes tiny verbatim slices as *parser test
-fixtures* rather than usable sample datasets.
+Defaults are kept small (0.5 s at 2 Msps) so they can live in the repo; use `--seconds` / `--sample-rate` for larger local datasets. This is distinct from `tests/collect_real_data.py`, which freezes tiny verbatim slices as parser test fixtures rather than usable sample datasets.
 
 ### Runnable Examples
 
@@ -538,7 +532,7 @@ Run any of them through uv so the project environment is used, e.g. `uv run pyth
 
 ## Method Reference
 
-The `HackRF` class is composed from mixins. Methods build a `hackrf-tools` command and run it through `_run` in one of four lifecycle modes (`blocking`, `timed`, `handle`, `stream`). Pass `print_cmd=True` to most methods to print the exact command that *would* run, without running it — useful for debugging and for learning the underlying tool invocation.
+The `HackRF` class is composed from mixins. Methods build a `hackrf-tools` command and run it through `_run` in one of four lifecycle modes (`blocking`, `timed`, `handle`, `stream`). Pass `print_cmd=True` to most methods to print the exact command that *would* run, without running it. This is useful for debugging and for learning the underlying tool invocation.
 
 ### Receive / Capture
 
@@ -571,7 +565,7 @@ The `HackRF` class is composed from mixins. Methods build a `hackrf-tools` comma
 #### `scan_frequencies`
 * **Signature:** `scan_frequencies(freqs, sample_rate, num_samples, *, on_capture=None, **kwargs)`
 * **Returns:** `{freq: complex64}` dict, or `None` if `on_capture` is given.
-* **Notes:** sequentially captures `num_samples` at each frequency, retuning between them. Makes multi-frequency capture one call. **Not gapless** — each retune is a fresh `hackrf_transfer` with a short re-open (the binary can't retune mid-stream); pass `on_capture(freq, iq)` to process-and-discard instead of holding every array.
+* **Notes:** sequentially captures `num_samples` at each frequency, retuning between them. Makes multi-frequency capture one call. **Not gapless**! Each retune is a fresh `hackrf_transfer` with a short re-open (the binary can't retune mid-stream); pass `on_capture(freq, iq)` to process-and-discard instead of holding every array.
 
 #### `open_receiver`
 * **Signature:** `open_receiver(freq, sample_rate, *, lna=16, vga=20, amp=False, baseband_bw=None, read_samples=131072)`
@@ -657,7 +651,7 @@ with h.open_receiver(100e6, 8e6) as rx:
 
 ### Device Management (advanced)
 
-These wrap the less-common tools. The firmware-writing operations are **brick-guarded** — they refuse unless `confirm=True` is passed explicitly, because a bad image or interrupted write can permanently disable the board.
+These wrap the less-common tools. The firmware-writing operations are **brick-guarded** (for lack of a better term). They refuse unless `confirm=True` is passed explicitly, because a bad image or interrupted write can permanently disable the board.
 
 The goal here is **full scripting access**: even where the library doesn't model every flag of a tool, the wrapping method forwards arbitrary arguments so nothing on the device is unreachable from Python.
 
@@ -700,7 +694,7 @@ Note that `-r` requires a clock number (e.g. `-r 3`); calling `clock("-r")` alon
 
 * **Builds:** `hackrf_debug <args...>`
 * **Signature:** `debug(*args, print_cmd=False)`
-* **Full passthrough.** Low-level read/write of the radio's chip registers (MAX2837, Si5351C, RFFC5071) for debugging and advanced configuration. **This is a sharp tool** — writing registers can put the radio in an undefined state. Read access is harmless; write access is your responsibility.
+* **Full passthrough.** Low-level read/write of the radio's chip registers (MAX2837, Si5351C, RFFC5071) for debugging and advanced configuration. **Use with care:** writing registers can put the radio in an undefined state. Read access is harmless; write access is your responsibility.
 
 ```python
 h = HackRF()
@@ -711,7 +705,7 @@ h.debug("--rffc5071", "-r")               # dump RFFC5071 registers
 
 #### SPI flash and CPLD — `spiflash_*`, `cpldjtag`
 
-These read and (dangerously) write the device's firmware storage. The write paths are brick-guarded.
+These read and (dangerously) write the device's firmware storage. The write paths are brick-guarded. DO NOT USE THIS IF YOU DON'T KNOW WHAT YOU'RE DOING.
 
 | Method | Builds | Guard |
 |---|---|---|
@@ -740,7 +734,7 @@ The `confirm=True` requirement exists because flashing firmware is the single mo
 
 ### Power and Relative Calibration
 
-The HackRF is **not a calibrated instrument** — its raw dBFS amplitude is relative to ADC full scale, not power at the antenna, and it depends on the gain you set. These helpers (Level 1) make readings *consistent*; turning them into approximate dBm (Levels 2–3) is a hardware-and-reference workflow shown in `examples/calibrate.py`.
+The HackRF is **not a calibrated instrument**. Its raw dBFS amplitude is relative to ADC full scale, not power at the antenna, and it depends on the gain you set. These helpers (Level 1) make readings *consistent*; turning them into approximate dBm (Levels 2–3) is a hardware-and-reference workflow shown in `examples/calibrate.py`. This calibration example is not meant to be echaustive, and the value it adds to an individual project or process is dependent on external tools.
 
 | Method | Purpose |
 |---|---|
@@ -748,7 +742,7 @@ The HackRF is **not a calibrated instrument** — its raw dBFS amplitude is rela
 | `gain_db(lna, vga, amp)` | total RX gain through the chain in dB. The quantity that makes a raw dBFS reading ambiguous. |
 | `relative_power_db(iq_or_dbfs, *, lna=, vga=, amp=, offset_db=0, freq_hz=, freq_correction=)` | gain-normalized power: subtracts the gain chain so readings at *different gains are comparable*. Gains default from `last_params`. Pass `offset_db` (from a calibration run) to approximate dBm, and a `freq_correction(freq)→dB` callable to flatten the front-end response. |
 
-The key property: the **same physical signal reads the same `relative_power_db` value regardless of gain**, where raw dBFS would shift by the gain delta. The library does only pure math here — it never invents reference data or claims a dBm it can't back up. To derive `offset_db` (feed a known power) or a `freq_correction` curve (sweep a flat source), run `examples/calibrate.py`; it saves a `calibration.json` you feed back in.
+The key property: the **same physical signal reads the same `relative_power_db` value regardless of gain**, where raw dBFS would shift by the gain delta. The library does only pure math here. To derive `offset_db` (feed a known power) or a `freq_correction` curve (sweep a flat source), run `examples/calibrate.py`; it saves a `calibration.json` you feed back in.
 
 ### Mode, Validation, and Feedback
 
@@ -764,7 +758,7 @@ The key property: the **same physical signal reads the same `relative_power_db` 
 
 ## Device Capability Coverage
 
-Great Scott Gadgets ships **eight** `hackrf-tools` binaries. This library wraps **all eight** — there is no device-interfacing tool it can't reach. (For comparison, some popular wrappers omit clock, cpldjtag, debug, and spiflash.)
+Great Scott Gadgets ships eight `hackrf-tools` binaries. This library wraps all eight. Not all eight are needed by the average device user.
 
 | Binary | Wrapped by | Coverage |
 |---|---|---|
@@ -794,17 +788,15 @@ h.debug("--si5351c", "-n", "0", "-r")    # read a register
 
 The handful of flags that don't fit the main capture/sweep paths each have a dedicated method, so they're first-class rather than escape-hatch-only:
 
-* `hackrf_sweep -B` / `-I` (binary / inverse-FFT output) → **`sweep_to_file(..., binary=True)`** / **`sweep_to_file(..., inverse_fft=True)`**. The text generator (`sweep`) stays CSV; the file method owns the binary formats. (The library does not *parse* the binary output — you own that on read.)
+* `hackrf_sweep -B` / `-I` (binary / inverse-FFT output) → **`sweep_to_file(..., binary=True)`** / **`sweep_to_file(..., inverse_fft=True)`**. The text generator (`sweep`) stays CSV; the file method owns the binary formats. The library does not *parse* the binary output, that has to be done in code later.
 * `hackrf_transfer -c` (constant-wave signal source) → **`transmit_cw(freq, sample_rate, amplitude=...)`**, TX-gated like any transmit.
 
-### Genuinely not wrapped
-
-What remains unexposed is minor and listed here so the boundary is explicit, not accidental:
+### Not wrapped
 
 * `hackrf_transfer -H` (hardware sync / wait-for-trigger) — a multi-device synchronization feature outside the single-device model here.
 * The exact flag set of `clock`/`operacake`/`debug` is version-dependent; the library forwards whatever you pass but doesn't validate it against your tools version.
 
-If you need `-H` before it's wrapped, drop to the internal runner — `h._run(["transfer", "-t", "f.iq", "-H", ...], mode="handle", kind="tx")` — accepting that you're then responsible for the invocation. Wrapping it properly (a typed parameter + a construction test) is a small, welcome addition.
+If you need `-H` before it's wrapped, drop to the internal runner ( `h._run(["transfer", "-t", "f.iq", "-H", ...], mode="handle", kind="tx")`) accepting that you're then responsible for the invocation. Wrapping it properly (a typed parameter + a construction test) has not been added to this library yet.
 
 
 ## CLI Reference
@@ -862,7 +854,7 @@ This is a brief section for anyone who jumped in a little ahead of the reading. 
 
 ### What an SDR Is (and Isn't)
 
-A software-defined radio moves the radio's "knobs" — tuning, filtering, demodulation — into software. The HackRF is a *wide-band, half-duplex, 8-bit* SDR: it covers an enormous frequency range but sees one band at a time, can't receive and transmit simultaneously, and quantizes coarsely (8-bit). That makes it a superb tool for exploration, capture, and experimentation, and a poor choice when you need high dynamic range or full-duplex operation. It is not a spectrum analyzer (though `hackrf_sweep` approximates one), and it is not a vector network analyzer.
+A software-defined radio moves the radio's "knobs" (that is, functions for for tuning, filtering, demodulation) into software. The HackRF is a *wide-band, half-duplex, 8-bit* SDR: it covers an enormous frequency range but sees one band at a time, can't receive and transmit simultaneously, and quantizes coarsely (8-bit). That makes it a superb tool for exploration, capture, and experimentation, and a poor choice when you need high dynamic range or full-duplex operation. It is not a spectrum analyzer (though `hackrf_sweep` approximates one), and it is not a vector network analyzer.
 
 ### Some General HackRF Notes
 
@@ -881,15 +873,15 @@ For scripting and automating HackRF capture, sweep, and transmit from Python whe
 
 ### Does this replace the official hackrf-tools?
 
-No — it *wraps* them. You still install `hackrf-tools`; this library orchestrates them and gives you a Python API and a friendlier CLI on top.
+No. What this library does is *wraps* `hackrf-tools` to make working with the HackRF One a bit easier on Windows. You still install `hackrf-tools`; this library orchestrates them and gives you a Python API and a friendlier CLI on top.
 
 ### Why wrap the binaries instead of using libhackrf bindings?
 
-Portability, especially on Windows. No C extension to compile means no toolchain matching, no build failures, and an install that just works once the binaries are present. The trade-off is the system dependency on `hackrf-tools` and a dependence on their stdout/exit behavior, which the library probes and version-checks.
+Portability, especially on Windows. No C extension to compile means no toolchain matching, no build failures, and an install that works once the binaries are present. The trade-off is the system dependency on `hackrf-tools` and a dependence on their stdout/exit behavior, which the library probes and version-checks.
 
 ### Will there be signal processing (demod, FFTs, waterfalls)?
 
-Not in this library. That is the planned second project. This one stops at delivering `complex64`; see [project_summary.md](project_summary.md) for the split.
+Not in this library. That is the planned second project. This one stops at delivering `complex64`.
 
 ### How often is this updated?
 
