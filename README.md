@@ -897,7 +897,7 @@ As development continues and as behavior is confirmed on hardware. This reposito
 
 ## Licensing
 
-This project is licensed under the GNU General Public License v2.0 or later. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v2.0. See the [LICENSE](LICENSE) file for details.
 
 The **code in this repository** is released under GPL-2.0-or-later. This licensing does NOT take priority over the official HackRF releases or the decisions of Great Scott Gadgets, and does NOT apply to their products or firmware.
 
