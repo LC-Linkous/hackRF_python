@@ -1,14 +1,11 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "hackrfpy"
-version = "0.1.0"
+version = "1.0.0"
 description = "A self-contained CLI + scriptable wrapper for the HackRF One, built on the hackrf-tools binaries (no libhackrf bindings required)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-2.0-or-later"
+license-files = ["LICENSE*"]
 authors = [{ name = "LC-Linkous" }]
 keywords = ["hackrf", "sdr", "rf", "spectrum", "sigmf"]
 classifiers = [
@@ -36,8 +33,13 @@ plotting = ["matplotlib"]
 hrf = "hackrfpy.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/LC-Linkous/hackrfpy"
-Repository = "https://github.com/LC-Linkous/hackrfpy"
+Homepage = "https://github.com/LC-Linkous/hackRF_python"
+Repository = "https://github.com/LC-Linkous/hackRF_python"
+Issues = "https://github.com/LC-Linkous/hackRF_python/issues"
+
+[build-system]
+requires = ["uv_build>=0.8.11,<0.9.0"]
+build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
@@ -46,9 +48,6 @@ dev = [
     "ruff",
     "mypy",
 ]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/hackrfpy"]
 
 [tool.pytest.ini_options]
 markers = [
