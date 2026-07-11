@@ -2,6 +2,10 @@
 ##--------------------------------------------------------------------\
 #   hackrfpy  'examples/sweep_collect.py'
 #   Collect one sweep across a band and save the bin powers to CSV.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import csv
 from hackrfpy import HackRF

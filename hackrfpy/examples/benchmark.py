@@ -21,6 +21,10 @@
 #     uv run python examples/benchmark.py
 #     uv run python examples/benchmark.py --rate 20e6 --seconds 3
 #     uv run python examples/benchmark.py --tools-dir "C:\hackrf-tools-windows"
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import argparse
 import sys

@@ -9,6 +9,10 @@
 #   Usage:
 #     uv run python examples/power_meter.py --freq 100e6
 #     uv run python examples/power_meter.py --freq 433.92e6 --rate 2e6
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import argparse
 import sys

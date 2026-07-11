@@ -28,6 +28,10 @@
 #     uv run python examples/calibrate.py --ref-freq 100e6 --ref-dbm -30
 #   Then use the printed offset:
 #     h.relative_power_db(iq, offset_db=<printed offset>)
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import argparse
 import json

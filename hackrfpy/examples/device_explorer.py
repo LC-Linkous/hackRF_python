@@ -5,6 +5,10 @@
 #   firmware + capabilities + any device warnings. Read-only. This is the
 #   HackRF analog of a serial-port autodetect -- it confirms the device is
 #   present and usable before you build anything on top of it.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import sys
 from hackrfpy import HackRF

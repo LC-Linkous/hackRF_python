@@ -17,6 +17,10 @@
 #
 #   Usage:
 #     uv run python examples/waterfall_persistent.py --freq 100e6 --rate 8e6
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import argparse
 import sys

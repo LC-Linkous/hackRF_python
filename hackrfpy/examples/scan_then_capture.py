@@ -3,6 +3,10 @@
 #   hackrfpy  'examples/scan_then_capture.py'
 #   Pipeline the class can express that CLI-only tools can't: sweep a band,
 #   find the strongest bin, then capture at that frequency.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import numpy as np
 from hackrfpy import HackRF
