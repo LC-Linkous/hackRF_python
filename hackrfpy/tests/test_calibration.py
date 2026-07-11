@@ -5,6 +5,10 @@
 #   Level-1 relative calibration helpers: power in dBFS, gain chain, and
 #   gain-normalized relative power (with optional offset + freq correction).
 #   Pure math, no hardware.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import numpy as np

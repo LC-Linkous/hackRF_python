@@ -5,6 +5,10 @@
 #   Hardware autodetection + identification. The HackRF is not a serial
 #   device, so "detect" means: run hackrf_info, confirm each board is a
 #   HackRF, report firmware/identity. Device-free via stub hackrf_info.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import pytest

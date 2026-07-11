@@ -4,6 +4,10 @@
 #   hackrfpy  'tests/test_bugfixes.py'
 #   Regression tests for the 2026-06-10 bug-fix pass. Each test pins one
 #   fixed behavior. No device needed (dry-run tests need hackrf-tools).
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import shutil

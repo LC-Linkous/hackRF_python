@@ -7,6 +7,10 @@
 #   parse. This catches the "example imports something not exported" class
 #   of bug (e.g. read_sigmf_meta) without needing hardware. Also covers
 #   sweep_stream, the context manager the waterfall example relies on.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import ast

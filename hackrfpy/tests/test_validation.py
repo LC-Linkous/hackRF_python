@@ -3,6 +3,10 @@
 ##--------------------------------------------------------------------\
 #   hackrfpy  'tests/test_validation.py'
 #   The validation envelope + mode machine. No device needed.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import pytest

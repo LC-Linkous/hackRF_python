@@ -8,6 +8,10 @@
 #   year, a value on an indented continuation line, and trailing free-text
 #   USB warnings -- none of which the original synthetic fixtures had.
 #   Serial / part ID anonymized.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

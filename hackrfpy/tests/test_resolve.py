@@ -4,6 +4,10 @@
 #   hackrfpy  'tests/test_resolve.py'
 #   Binary resolution, especially the Windows-extension path that the
 #   documented tools_dir workflow depends on. Pure / no device.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

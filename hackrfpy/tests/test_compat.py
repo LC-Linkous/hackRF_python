@@ -7,6 +7,10 @@
 #   return_params tuple, and the version feature-probe. Cross-platform
 #   stubs (conftest.stub_device) so the process-lifecycle ones run on
 #   Windows too.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import time

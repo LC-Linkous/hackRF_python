@@ -6,6 +6,10 @@
 #   amortizing the per-capture startup cost. Verifies exact-count reads from
 #   a SINGLE process launch, the blocks()/callback() access patterns, the
 #   read-size tunability, and clean close.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import numpy as np

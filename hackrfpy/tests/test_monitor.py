@@ -5,6 +5,10 @@
 #   monitor_frequencies: sweep-backed power-over-time monitoring. Distinct
 #   from scan_frequencies (which returns IQ). Verifies frequency->segment
 #   mapping, multi-pass yielding, final-pass flush, and callback mode.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 from hackrfpy import HackRF

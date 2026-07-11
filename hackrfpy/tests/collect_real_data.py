@@ -23,6 +23,10 @@
 #       python tests/collect_real_data.py --tools-dir "C:\hackrf-tools-windows"
 #       python tests/collect_real_data.py --anonymize        # scrub serials
 #       python tests/collect_real_data.py --sweep-band 88:108 --rx-freq 100e6
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import argparse

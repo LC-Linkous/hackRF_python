@@ -12,6 +12,10 @@
 #   frozen fixtures can't prove: that hackrf_info output matches the parser,
 #   that a real capture yields the right sample count, that hackrf_sweep -N
 #   actually terminates, that the reap paths stop a real child cleanly.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import time

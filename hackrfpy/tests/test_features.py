@@ -7,6 +7,10 @@
 #   core-vs-optional split, sweep MHz-edge warning, and the TX dead-man cap.
 #   Cross-platform stubs (conftest.stub_device) stand in for hackrf_* so
 #   these run on Windows too.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import time

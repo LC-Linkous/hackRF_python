@@ -3,6 +3,10 @@
 ##--------------------------------------------------------------------\
 #   hackrfpy  'tests/test_parsing.py'
 #   Parsing logic against frozen real-ish captures. Runs without a device.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

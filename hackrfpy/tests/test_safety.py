@@ -7,8 +7,11 @@
 #   and the TX gain ceiling. These guard the worst outcomes (bricked board,
 #   silent out-of-spec operation, illegal transmit), so they are pinned
 #   explicitly rather than left to integration coverage.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
-
 import sys
 
 import pytest

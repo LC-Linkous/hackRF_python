@@ -11,6 +11,10 @@
 #   NOTE: these intentionally do NOT skip on Windows. If they fail on
 #   Windows, that is a real finding about CTRL_BREAK_EVENT reaping, which
 #   is the previously-uncovered (pragma: no cover) interrupt path.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os
