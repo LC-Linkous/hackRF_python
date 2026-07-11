@@ -9,7 +9,9 @@
 #   the SigMF core namespace; HackRF native format is interleaved signed 8-bit
 #   I/Q -> datatype "ci8".
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import json

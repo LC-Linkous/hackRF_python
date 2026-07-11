@@ -9,7 +9,9 @@
 #   stderr with a clean exit code. Importing scripts get real, catchable
 #   exceptions instead of sentinel return values.
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 

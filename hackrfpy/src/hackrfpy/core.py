@@ -14,7 +14,9 @@
 #   (sweep CSV), or open-ended (rx until stopped). So _run takes a `mode`
 #   argument the way a serial wrapper takes a length flag.
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

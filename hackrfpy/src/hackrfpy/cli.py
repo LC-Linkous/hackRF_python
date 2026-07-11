@@ -14,7 +14,8 @@
 #   instantiates HackRF once, calls the method, and maps typed exceptions to
 #   clean stderr + exit codes. All real work lives in core + mixins.
 #
-#   Author(s): <you>
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import argparse

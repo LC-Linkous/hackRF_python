@@ -16,7 +16,9 @@
 #   state. Editing them changes what the library will accept/reject; it does
 #   not change anything on the board.
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 # ---- hard ranges (reject-by-default; --force / allow_out_of_spec downgrades

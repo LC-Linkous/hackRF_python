@@ -13,6 +13,10 @@
 #   frequency", NOT "one process I can retune". For multiple frequencies use
 #   scan_frequencies (separate captures) or monitor_frequencies (sweep). True
 #   gapless retuning needs the C library.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import numpy as np

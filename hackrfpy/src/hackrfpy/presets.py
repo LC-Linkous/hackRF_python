@@ -12,7 +12,9 @@
 #   Built-ins can be extended/overridden from a user TOML
 #   (~/.config/hackrfpy/presets.toml) via load_presets().
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

@@ -5,6 +5,10 @@
 #   Shared context manager that guarantees a live capture/sweep generator
 #   is closed (and its child process reaped) on block exit, including on
 #   exception or KeyboardInterrupt. Used by capture_stream and sweep_stream.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 
