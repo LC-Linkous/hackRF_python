@@ -5,7 +5,8 @@
 [![PyPI - Wheel](https://img.shields.io/pypi/wheel/hackrfpy.svg)](https://pypi.org/project/hackrfpy/)
 [![Downloads](https://static.pepy.tech/badge/hackrfpy)](https://pepy.tech/project/hackrfpy)
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-
+[![Tests](https://github.com/LC-Linkous/hackRF_python/actions/workflows/tests.yml/badge.svg)](https://github.com/LC-Linkous/hackRF_python/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/LC-Linkous/hackRF_python/branch/main/graph/badge.svg)](https://codecov.io/gh/LC-Linkous/hackRF_python)
 
 
 ## An UNOFFICIAL Python CLI + scripting wrapper for the HackRF One

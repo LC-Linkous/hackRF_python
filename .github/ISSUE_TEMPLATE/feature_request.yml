@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: **signal processing (demod, FFTs, waterfalls) is out of
+        scope** for this repo — it stops at delivering `complex64`. See
+        `project_summary.md` for the split with the planned DSP project.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do that the library doesn't currently support?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would the method / CLI command / behavior look like? A sketch of the signature is helpful.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Receive / capture
+        - Sweep
+        - Transmit
+        - Info / preflight / detect
+        - Device management (clock/operacake/spiflash/debug)
+        - Decoding / file helpers / SigMF
+        - CLI
+        - Docs / examples
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, or why the passthrough methods (`clock`/`operacake`/`debug`) don't cover it.
+    validations:
+      required: false

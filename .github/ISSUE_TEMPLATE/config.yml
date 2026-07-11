@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Official HackRF documentation
+    url: https://hackrf.readthedocs.io/
+    about: Authoritative reference for device behavior, valid ranges, and TX safety. Check here first.
+  - name: HackRF firmware & tools (Great Scott Gadgets)
+    url: https://github.com/greatscottgadgets/hackrf
+    about: Report firmware, libhackrf, or hackrf-tools issues upstream — not here.
+  - name: Question / usage help
+    url: https://github.com/LC-Linkous/hackRF_python/discussions
+    about: For "how do I..." questions, open a Discussion rather than an issue.
