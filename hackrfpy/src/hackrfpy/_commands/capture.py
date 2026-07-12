@@ -268,7 +268,7 @@ class CaptureMixin:
                 seg = f"{base}_{idx:03d}{ext}"
                 argv = self._rx_argv(freq, sample_rate, seg, lna, vga, amp,
                                      bias_tee, bw, n_per)
-                res = self._run(argv, mode="blocking", print_cmd=print_cmd)
+                self._run(argv, mode="blocking", print_cmd=print_cmd)
                 if sigmf and not print_cmd:
                     write_sigmf_meta(seg, freq, sample_rate, lna=lna, vga=vga,
                                      amp=amp, datatype="ci8")

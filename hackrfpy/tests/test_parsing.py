@@ -13,7 +13,6 @@ import os
 import numpy as np
 
 from hackrfpy import HackRF
-from hackrfpy.core import HackRF as _H
 from hackrfpy._commands.sweep import SweepMixin
 from hackrfpy._commands.info import InfoMixin
 

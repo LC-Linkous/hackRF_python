@@ -180,7 +180,7 @@ class SweepMixin:
             argv += ["-I"]          # binary inverse FFT (binary output mode)
         elif binary:
             argv += ["-B"]          # raw binary output
-        res = self._run(argv, mode="blocking", print_cmd=print_cmd)
+        self._run(argv, mode="blocking", print_cmd=print_cmd)
         return None if print_cmd else out
 
     def sweep_stream(self, f_min_hz, f_max_hz, **k):

@@ -16,7 +16,7 @@ import re
 import shutil
 
 from .. import constants as C
-from ..exceptions import HackRFDeviceError, HackRFEnvironmentError, HackRFValueError
+from ..exceptions import HackRFDeviceError, HackRFValueError
 
 
 class DeviceMixin:

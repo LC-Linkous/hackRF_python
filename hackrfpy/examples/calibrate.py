@@ -72,7 +72,7 @@ def freq_response_curve(h, args):
     # reference (a broadband noise source with known-flat output). Lacking
     # that, this still captures the *relative* shape vs the reference freq,
     # which removes most of the "why is 2.4 GHz lower than 100 MHz" confound.
-    print(f"\n== frequency-response characterization ==")
+    print("\n== frequency-response characterization ==")
     print("   NOTE: only meaningful with a FLAT reference source connected.")
     if not args.assume_ready:
         input("   press Enter with the flat reference on (or Ctrl-C to skip)... ")

@@ -46,7 +46,7 @@ from hackrfpy import HackRF                       # noqa: E402
 from hackrfpy.exceptions import HackRFError       # noqa: E402
 
 try:
-    import numpy as np                            # noqa: E402
+    import numpy as np                            # noqa: E402, F401
 except ModuleNotFoundError:
     sys.stderr.write(
         "ERROR: numpy is not available in this environment.\n"

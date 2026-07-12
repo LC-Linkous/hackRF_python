@@ -14,7 +14,6 @@
 
 import numpy as np
 
-from hackrfpy import HackRF
 
 
 def _streaming_device(stub_device, nbytes=200_000):

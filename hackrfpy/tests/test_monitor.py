@@ -11,7 +11,6 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
-from hackrfpy import HackRF
 
 
 # two sweep passes (two timestamps), segments covering 100 and 433 MHz

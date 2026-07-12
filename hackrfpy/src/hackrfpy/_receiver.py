@@ -19,7 +19,6 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
-import numpy as np
 
 
 class PersistentReceiver:

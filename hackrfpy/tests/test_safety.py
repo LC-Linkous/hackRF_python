@@ -12,7 +12,6 @@
 #   Author(s): Lauren Linkous
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
-import sys
 
 import pytest
 

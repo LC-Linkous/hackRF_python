@@ -11,10 +11,8 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
-import pytest
 
 from hackrfpy import HackRF
-from hackrfpy.exceptions import HackRFDeviceError
 
 
 _ONE_BOARD = [
