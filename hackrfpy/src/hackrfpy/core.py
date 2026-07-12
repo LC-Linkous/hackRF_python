@@ -20,6 +20,7 @@
 ##--------------------------------------------------------------------\
 
 import atexit
+import logging
 import os
 import shutil
 import signal
@@ -39,6 +40,35 @@ from ._commands.capture import CaptureMixin
 from ._commands.transmit import TransmitMixin
 from ._commands.sweep import SweepMixin
 from ._commands.device import DeviceMixin
+
+
+# ---- diagnostics channel ----------------------------------------------------
+# Library diagnostics go through logging, not print(), so a consumer can route,
+# filter, or silence them. Two rules hold, and the tests pin both:
+#
+#   1. Diagnostics NEVER touch stdout. stdout is for DATA (sweep CSV, an
+#      IQ stream on `-r -`) and for explicitly-requested output (a --print-cmd
+#      preview). `hrf sweep -v > out.csv` must not put "[*] mode: rx" in the CSV.
+#   2. Warnings fire regardless of verbose. A safety notice that only appears in
+#      verbose mode is, in practice, a silent warning.
+#
+# No NullHandler is installed on purpose: with no handler anywhere, logging's
+# last-resort handler emits WARNING+ to stderr on its own, which preserves the
+# "warnings always show, zero setup required" contract for plain scripts.
+log = logging.getLogger("hackrfpy")
+
+
+def _ensure_console_logging():
+    # The last-resort handler only emits WARNING and above, so verbose=True in a
+    # plain script would otherwise print nothing at INFO. Attach a stderr handler
+    # -- but ONLY if nobody has configured logging (neither our logger nor the
+    # root). If the host application owns logging, stay out of its way and just
+    # let records propagate.
+    if log.handlers or logging.getLogger().handlers:
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(message)s"))   # bare: no level prefix
+    log.addHandler(handler)
 
 # ---- platform interrupt plumbing -------------------------------------------
 # hackrf_* tools flush + close cleanly on SIGINT. On Windows SIGINT can't be
@@ -178,7 +208,10 @@ class _Process:
 class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     def __init__(self, tools_dir=None, verbose=False, serial=None):
         # ---- feedback ----
-        self.verboseEnabled = verbose
+        # via set_verbose so that HackRF(verbose=True) wires up the console
+        # handler exactly like an explicit set_verbose(True) call would.
+        self.verboseEnabled = False
+        self.set_verbose(verbose)
 
         # ---- device selection (multi-board setups) ----
         # When set, `-d <serial>` is injected into every tool that supports
@@ -225,20 +258,29 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     def set_verbose(self, verbose=True):
         self.verboseEnabled = verbose
+        if verbose:
+            # Make INFO actually visible in a plain script (see
+            # _ensure_console_logging). No-op if the host app configured logging.
+            _ensure_console_logging()
+            if log.getEffectiveLevel() > logging.INFO:
+                log.setLevel(logging.INFO)
 
     def get_verbose(self):
         return self.verboseEnabled
 
     def print_message(self, msg):
+        # Progress / status chatter. INFO, and gated on verbose so the level and
+        # the flag agree. Goes to stderr (never stdout) -- see the module note.
         if self.verboseEnabled:
-            print(msg)
+            log.info(msg)
 
     def warn(self, msg):
         # Safety / correctness warnings the user must see REGARDLESS of verbose.
         # (A degraded-results or out-of-spec notice that only prints in verbose
-        # mode is, in practice, a silent warning.) Routed to stderr so it never
-        # pollutes stdout data streams (sweep CSV, rx -r -).
-        print(f"[!] {msg}", file=sys.stderr)
+        # mode is, in practice, a silent warning.) WARNING level, so it survives
+        # with no logging setup at all via logging's last-resort stderr handler.
+        # The "[!] " marker lives in the message so it shows under any formatter.
+        log.warning(f"[!] {msg}")
 
     # =================================================================
     # Operating mode machine

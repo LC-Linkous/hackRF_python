@@ -13,6 +13,7 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
+import logging
 import time
 
 import numpy as np
@@ -58,15 +59,16 @@ def test_capture_stream_reaps_on_exception(stub_device, tmp_path):
 
 
 # ---- from_device: fail-fast capability probe -------------------------------
-def test_from_device_probes_and_warns_on_old_firmware(stub_device, capsys):
+def test_from_device_probes_and_warns_on_old_firmware(stub_device, caplog):
     h = stub_device(info=dict(stdout_lines=[
         "hackrf_info version: 2019.12.1",
         "libhackrf version: 2019.12.1 (0.5)",
         "Found HackRF", "Index: 0",
         "Serial number: 000000000000000000000000deadbeef"]))
-    dev = HackRF.from_device(tools_dir=h.tools_dir)
+    with caplog.at_level(logging.WARNING, logger="hackrfpy"):
+        dev = HackRF.from_device(tools_dir=h.tools_dir)
     assert dev._probed["boards"]
-    assert "predates 2021" in capsys.readouterr().err
+    assert "predates 2021" in "\n".join(r.message for r in caplog.records)
 
 
 def test_from_device_raises_when_no_board(stub_device):
@@ -103,15 +105,16 @@ def test_core_tools_are_subset_of_tools():
 
 
 # ---- sweep: sub-MHz edges warn ---------------------------------------------
-def test_sweep_warns_on_sub_mhz_edges(capsys, monkeypatch):
+def test_sweep_warns_on_sub_mhz_edges(caplog, monkeypatch):
     h = HackRF()
     def empty_stream(*a, **k):
         if False:
             yield
     monkeypatch.setattr(h, "_run", empty_stream)
-    gen = h.sweep(433_920_000, 434_500_000)
-    list(gen)
-    assert "snapped to MHz" in capsys.readouterr().err
+    with caplog.at_level(logging.WARNING, logger="hackrfpy"):
+        gen = h.sweep(433_920_000, 434_500_000)
+        list(gen)
+    assert "snapped to MHz" in "\n".join(r.message for r in caplog.records)
 
 
 # ---- tx: max_duration converts an open-ended repeat into a timed run -------

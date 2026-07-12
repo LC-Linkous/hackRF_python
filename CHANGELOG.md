@@ -21,28 +21,51 @@ release.
   `SECURITY.md`, issue templates, and a pull request template.
 
 ### Changed
+- Library diagnostics now go through the standard `logging` module instead of
+  `print()`. Records are emitted on the `hackrfpy` logger: warnings at
+  `WARNING`, verbose progress messages at `INFO`. A consumer can now route,
+  reformat, or silence hackrfpy's output like any other library.
+  - **Diagnostics no longer touch stdout.** `print_message` previously wrote to
+    stdout, so `hrf sweep -v > out.csv` prepended `[*] mode: rx` into the CSV.
+    stdout is now reserved for data (sweep CSV, IQ on `-r -`) and explicitly
+    requested output (`--print-cmd`). Diagnostics go to stderr.
+  - Console behavior is unchanged for scripts and the CLI: warnings still appear
+    with no setup at all, and `verbose=True` / `-v` still prints progress. If the
+    host application has configured logging, hackrfpy stays out of the way and
+    simply propagates records to it.
 - Packaging classifiers: removed the contradictory `Operating System ::
   OS Independent` (the library shells out to the Windows `hackrf-tools`
   binaries and Linux/macOS operation is unverified), leaving `Operating System
   :: Microsoft :: Windows`. Development status raised from `3 - Alpha` to
   `5 - Production/Stable` to match the 1.0.0 release.
+- Ruff configuration added (`line-length = 100`, `select = ["E", "F", "W"]`), and
+  the codebase made lint-clean so the CI lint job is meaningful.
 
 ### Fixed
+- Unbounded memory growth on long-lived RX/TX handles: `_Process` drained child
+  stdout/stderr into lists that were never trimmed, so an open-ended capture or
+  repeat transmit retained every per-second stats line for the life of the
+  process. Both drain paths now share a 64 KB cap (`_DRAIN_CAP`).
+- `transmit()` now verifies the source file exists *before* arming TX and
+  spawning `hackrf_transfer`, raising `HackRFEnvironmentError` instead of
+  failing with a generic non-zero exit from the tool. The TX-mode gate is still
+  checked first, and `print_cmd` dry runs skip the check.
+- SigMF sidecars now declare the `hackrf` namespace in `core:extensions`.
+  Previously the `hackrf:*` gain keys were written without declaring the
+  extension, which strict SigMF validators reject.
+- Removed unreachable dead code in `core.py` (an orphaned `return load_iq(...)`
+  after a `return`, referencing three undefined names).
+- The test suite no longer writes a stray `capture.sigmf-meta` into the working
+  directory on every run.
 - `CITATION.cff` version and release date corrected to `1.0.0` / `2026-06-16`,
   aligning the citation metadata with `pyproject.toml` and the tagged release.
 
 <!--
 Roadmap for this branch (append entries above as each lands):
-  - Fix: cap the _Process stdout/stderr drain buffers (unbounded growth on
-    long-lived RX/TX handles).
-  - Fix: validate the transmit source file exists before arming TX mode.
-  - Fix: declare the `hackrf` namespace in SigMF `core:extensions`.
-  - Changed: route library diagnostics through the `logging` module instead of
-    print(); `warn`/`print_message` become thin wrappers. NOTE breaking-ish:
-    library users who set verbose=True must configure a logging handler to see
-    info-level messages (the CLI configures this automatically).
   - Added: type annotations across the public API; mypy promoted to a CI gate
     (makes the shipped py.typed marker accurate).
+  - CI: --cov-fail-under=85; confirm the Windows leg exercises the CTRL_BREAK
+    lifecycle path.
   - Docs: note that a single HackRF instance is not safe to share across
     threads (deferred pending broader testing).
 -->
