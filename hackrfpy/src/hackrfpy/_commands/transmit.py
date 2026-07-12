@@ -14,7 +14,10 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+import os
+
 from .. import constants as C
+from ..exceptions import HackRFEnvironmentError
 
 
 class TransmitMixin:
@@ -28,6 +31,12 @@ class TransmitMixin:
         #   regulatory + hardware risk if the controlling script dies; this
         #   gives every transmit an optional dead-man bound.
         self.require_mode(C.MODE_TX)          # the gate
+        # Fail fast on a bad path BEFORE spawning hackrf_transfer, so a typo'd
+        # source raises a clean, catchable error instead of a generic non-zero
+        # exit from the tool. Skipped for print_cmd (a dry run is a pure command
+        # preview and may reference a file you haven't generated yet).
+        if not print_cmd and not os.path.isfile(source):
+            raise HackRFEnvironmentError(f"transmit source not found: {source!r}")
         freq, sample_rate, txvga, amp = self.validate_tx(
             freq, sample_rate, txvga, amp)
         bw = self._auto_baseband(sample_rate, baseband_bw)

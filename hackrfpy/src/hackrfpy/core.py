@@ -93,6 +93,14 @@ from ._commands.sweep import SweepMixin
 from ._commands.device import DeviceMixin
 
 
+# Upper bound on retained drained output per stream (stdout / stderr). The
+# handle-mode drain and the streaming-mode stderr tail both cap here so a
+# long-lived RX/TX handle can't grow memory without bound (hackrf_transfer
+# prints a stats line every second for the life of the process). We keep the
+# most-recent bytes -- enough for an error tail -- and drop older ones.
+_DRAIN_CAP = 64 * 1024
+
+
 class _Process:
     # Thin controller returned by _run(mode="handle") for "run until I stop it"
     # workflows (the wait-for-user-stop consumption mode). Wraps a Popen and
@@ -124,6 +132,11 @@ class _Process:
         try:
             for chunk in iter(lambda: stream.read(65536), b""):
                 sink.append(chunk)
+                # Bound retained output: drop oldest chunks once over the cap,
+                # always keeping at least the latest one. Prevents unbounded
+                # growth on open-ended handles (see _DRAIN_CAP).
+                while sum(len(c) for c in sink) > _DRAIN_CAP and len(sink) > 1:
+                    sink.pop(0)
         except (OSError, ValueError):
             pass  # pipe closed under us during shutdown
 
@@ -539,7 +552,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                                 stderr=subprocess.PIPE, text=text,
                                 creationflags=_CREATION_FLAGS)
         err_tail = []
-        err_cap = 64 * 1024
+        err_cap = _DRAIN_CAP
 
         def _eat(stream, sink):
             try:

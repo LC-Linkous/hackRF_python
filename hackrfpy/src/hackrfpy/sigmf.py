@@ -52,6 +52,14 @@ def write_sigmf_meta(data_path, freq, sample_rate, *, lna=None, vga=None,
         ],
         "annotations": [],
     }
+    # SigMF requires any non-core namespace used in the file to be declared in
+    # core:extensions, or strict validators reject it. We only emit hackrf:*
+    # keys when gains are supplied, so declare the extension exactly then.
+    # optional=True: a reader can decode the IQ without understanding hackrf:*.
+    if annotations_gains:
+        meta["global"]["core:extensions"] = [
+            {"name": "hackrf", "version": "1.0.0", "optional": True}
+        ]
     if extra:
         meta["global"].update(extra)
 
