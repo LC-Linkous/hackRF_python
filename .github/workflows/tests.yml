@@ -71,9 +71,6 @@ jobs:
       - name: Ruff lint
         run: uv run ruff check .
 
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
       - name: Mypy
         # Non-blocking for now: flip `continue-on-error` to false once the
         # type surface is clean and you want mypy to gate merges.

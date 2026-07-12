@@ -19,12 +19,14 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
+import atexit
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import weakref
 
 import numpy as np
 
@@ -32,6 +34,11 @@ from . import constants as C
 from .exceptions import (
     HackRFValueError, HackRFModeError, HackRFDeviceError, HackRFEnvironmentError,
 )
+from ._commands.info import InfoMixin
+from ._commands.capture import CaptureMixin
+from ._commands.transmit import TransmitMixin
+from ._commands.sweep import SweepMixin
+from ._commands.device import DeviceMixin
 
 # ---- platform interrupt plumbing -------------------------------------------
 # hackrf_* tools flush + close cleanly on SIGINT. On Windows SIGINT can't be
@@ -66,9 +73,6 @@ def _interrupt(proc):
 # interference problem). RX handles are registered by default but can opt out
 # (an orphaned receiver only wastes disk, and fire-and-forget is occasionally
 # wanted).
-import atexit
-import weakref
-
 _LIVE = weakref.WeakSet()
 
 
@@ -84,13 +88,6 @@ def _stop_all_live():
                 h.stop()
         except Exception:
             pass  # best-effort on the way down; never raise from atexit
-
-
-from ._commands.info import InfoMixin
-from ._commands.capture import CaptureMixin
-from ._commands.transmit import TransmitMixin
-from ._commands.sweep import SweepMixin
-from ._commands.device import DeviceMixin
 
 
 # Upper bound on retained drained output per stream (stdout / stderr). The
@@ -682,8 +679,6 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         if freq_hz is not None and freq_correction is not None:
             value -= float(freq_correction(freq_hz))
         return value
-
-        return load_iq(path, count=count, offset_samples=offset_samples)
 
     def estimate_capture(self, sample_rate, num_samples=None, duration=None,
                          path="."):

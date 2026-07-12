@@ -1,0 +1,27 @@
+{
+  "global": {
+    "core:datatype": "ci8",
+    "core:sample_rate": 8000000.0,
+    "core:hw": "HackRF One",
+    "core:version": "1.0.0",
+    "core:recorder": "hackrfpy",
+    "hackrf:lna_gain_db": 24,
+    "hackrf:vga_gain_db": 20,
+    "hackrf:amp_enabled": false,
+    "core:extensions": [
+      {
+        "name": "hackrf",
+        "version": "1.0.0",
+        "optional": true
+      }
+    ]
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 433920000.0,
+      "core:datetime": "2026-07-12T00:05:06.505987+00:00"
+    }
+  ],
+  "annotations": []
+}
