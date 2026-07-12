@@ -115,12 +115,14 @@ def test_sweep_warns_on_sub_mhz_edges(capsys, monkeypatch):
 
 
 # ---- tx: max_duration converts an open-ended repeat into a timed run -------
-def test_tx_max_duration_forces_timed(monkeypatch):
+def test_tx_max_duration_forces_timed(monkeypatch, tmp_path):
     h = HackRF()
     h.set_mode(C.MODE_TX)
+    src = tmp_path / "sig.iq"
+    src.write_bytes(b"\x00\x01" * 8)             # real file for the source guard
     seen = {}
     monkeypatch.setattr(h, "_run",
                         lambda argv, **k: seen.update(k) or ("", "", 0))
-    h.transmit(433.92e6, 8e6, "sig.iq", repeat=True, max_duration=5.0)
+    h.transmit(433.92e6, 8e6, str(src), repeat=True, max_duration=5.0)
     assert seen.get("mode") == "timed"
     assert seen.get("duration") == 5.0

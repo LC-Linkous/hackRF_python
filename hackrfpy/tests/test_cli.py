@@ -209,12 +209,27 @@ def test_doctor_ok_with_core_tools(cli_env):
     _run_cli(["doctor"])
 
 
-def test_doctor_exits_when_core_tool_missing(cli_env):
-    # remove a CORE tool so preflight reports a problem -> exit 1
-    for fn in ("hackrf_sweep", "hackrf_sweep.bat", "hackrf_sweep.py"):
-        p = os.path.join(cli_env.tools, fn)
-        if os.path.exists(p):
-            os.remove(p)
+def test_doctor_exits_when_core_tool_missing(cli_env, monkeypatch):
+    # Force resolve() to fail for the sweep tool so preflight reports a missing
+    # CORE binary -> exit 1.
+    #
+    # NOTE: deleting the stub from tools_dir is NOT enough. resolve() falls back
+    # to shutil.which(), so on a machine with real hackrf-tools on PATH (i.e.
+    # any actual dev box) it would find the real hackrf_sweep and report no
+    # problems. Patching resolve makes this deterministic everywhere.
+    from hackrfpy.core import HackRF as _HackRF
+    from hackrfpy import constants as C
+    from hackrfpy.exceptions import HackRFDeviceError
+
+    real_resolve = _HackRF.resolve
+
+    def _resolve(self, key):
+        if key == "sweep":
+            raise HackRFDeviceError(f"missing binary: {C.TOOLS['sweep']}")
+        return real_resolve(self, key)
+
+    monkeypatch.setattr(_HackRF, "resolve", _resolve)
+
     with pytest.raises(SystemExit) as exc:
         _run_cli(["doctor"])
     assert exc.value.code == 1

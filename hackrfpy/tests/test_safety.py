@@ -149,3 +149,39 @@ def test_transmit_cw_builds_c_flag(monkeypatch):
     assert seen["argv"][0] == "transfer"
     assert seen["argv"][1] == "-c"
     assert seen["argv"][2] == 127                                # clamped 0-127
+
+
+# ---- transmit source-file guard: fail fast before spawning ------------------
+def test_transmit_missing_source_rejected(monkeypatch):
+    from hackrfpy.exceptions import HackRFEnvironmentError
+    h = HackRF()
+    h.set_mode(C.MODE_TX)
+    monkeypatch.setattr(h, "_run",
+                        lambda *a, **k: pytest.fail("must not spawn on bad source"))
+    with pytest.raises(HackRFEnvironmentError, match="source not found"):
+        h.transmit(433.92e6, 8e6, "/no/such/file.iq")
+
+
+def test_transmit_mode_gate_precedes_source_check(monkeypatch):
+    # With BOTH a wrong mode and a missing file, the TX-mode gate must win --
+    # the safety invariant is checked before input validation.
+    from hackrfpy.exceptions import HackRFModeError
+    h = HackRF()                                 # defaults to RX
+    assert h.mode == C.MODE_RX
+    monkeypatch.setattr(h, "_run",
+                        lambda *a, **k: pytest.fail("must not spawn"))
+    with pytest.raises(HackRFModeError):
+        h.transmit(433.92e6, 8e6, "/no/such/file.iq")
+
+
+def test_transmit_print_cmd_skips_source_check(monkeypatch):
+    # A dry-run preview must not require the file to exist (it may be a file
+    # you haven't generated yet).
+    h = HackRF()
+    h.set_mode(C.MODE_TX)
+    seen = {}
+    monkeypatch.setattr(h, "_run",
+                        lambda argv, **k: seen.update(argv=argv))
+    h.transmit(433.92e6, 8e6, "/no/such/file.iq", print_cmd=True)
+    assert seen["argv"][0] == "transfer"
+    assert "-t" in seen["argv"]

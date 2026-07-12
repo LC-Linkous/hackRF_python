@@ -76,7 +76,10 @@ def test_timed_stops_chatty_child_on_schedule(stub_device):
 # ---- handle mode -----------------------------------------------------------
 def test_handle_drains_pipes_and_stops_cleanly(stub_device):
     # flood stderr past the pipe buffer immediately; without drain threads
-    # this blocks the child (the classic deadlock)
+    # this blocks the child (the classic deadlock). Reaching "started" on
+    # stdout proves the flood was drained past. The retained tail is now
+    # bounded by _DRAIN_CAP so an open-ended handle can't grow without bound.
+    from hackrfpy.core import _DRAIN_CAP
     h = stub_device(transfer=dict(
         stderr_flood=262144, stdout_lines=["started"], idle=True))
     proc = h._run(["transfer", "-r", "x.iq"], mode="handle")
@@ -87,8 +90,21 @@ def test_handle_drains_pipes_and_stops_cleanly(stub_device):
         time.sleep(0.05)
     assert proc.is_alive()
     out, err, rc = proc.stop()
-    assert len(err) >= 262144
+    assert 0 < len(err) <= _DRAIN_CAP        # drained, but capped (was: >= flood)
     assert b"started" in out
+
+
+def test_handle_drain_buffer_is_capped(stub_device):
+    # Regression: the handle-mode drain used to retain ALL output, growing
+    # memory without bound on long-lived RX/TX handles. Flood far past the cap,
+    # then exit; wait() joins the drain threads so the retained size is
+    # deterministic and must be bounded by _DRAIN_CAP.
+    from hackrfpy.core import _DRAIN_CAP
+    h = stub_device(transfer=dict(stderr_flood=_DRAIN_CAP * 8))
+    proc = h._run(["transfer", "-r", "x.iq"], mode="handle")
+    out, err, rc = proc.wait()
+    assert rc == 0
+    assert 0 < len(err) <= _DRAIN_CAP
 
 
 def test_handle_context_manager_reaps(stub_device):
