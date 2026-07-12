@@ -1,0 +1,72 @@
+name: Bug report
+description: Something isn't working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This library wraps the `hackrf-tools` binaries, so
+        please include tool/OS details — most issues are environment-specific.
+
+        If this involves **transmitting**, do not include instructions that would
+        help someone operate illegally; describe the software behavior only.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact command or minimal code. Include `print_cmd=True` / `--print-cmd` output if relevant.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. Windows 11 23H2 / Ubuntu 24.04 / macOS 14"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "output of: python --version"
+    validations:
+      required: true
+  - type: input
+    id: hackrfpy
+    attributes:
+      label: hackrfpy version
+      placeholder: "output of: pip show hackrfpy | grep Version"
+    validations:
+      required: true
+  - type: textarea
+    id: tools
+    attributes:
+      label: hackrf-tools / firmware version
+      description: Paste the output of `hackrf_info` (redact serial numbers if you wish).
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: Was a HackRF board connected?
+      options:
+        - "Yes, a real board was connected"
+        - "No, this reproduces without hardware"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Full traceback or stderr output. Run with `verbose=True` / `-v` if possible.
+      render: shell

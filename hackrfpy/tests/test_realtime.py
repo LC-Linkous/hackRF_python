@@ -6,10 +6,13 @@
 #   receive (capture_callback), sequential multi-frequency scanning
 #   (scan_frequencies), and proof the optimized decode is bit-identical to
 #   the old path. Cross-platform stubs; no device.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import numpy as np
-import pytest
 
 from hackrfpy import HackRF
 

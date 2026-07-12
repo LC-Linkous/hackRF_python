@@ -9,16 +9,23 @@
 #   the SigMF core namespace; HackRF native format is interleaved signed 8-bit
 #   I/Q -> datatype "ci8".
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
+
+from __future__ import annotations
 
 import json
 import os
 from datetime import datetime, timezone
+from typing import Any
 
 
-def write_sigmf_meta(data_path, freq, sample_rate, *, lna=None, vga=None,
-                     amp=None, datatype="ci8", extra=None):
+def write_sigmf_meta(data_path: str, freq: float, sample_rate: float, *,
+                     lna: int | None = None, vga: int | None = None,
+                     amp: bool | None = None, datatype: str = "ci8",
+                     extra: dict[str, Any] | None = None) -> str:
     # Sidecar path: foo.iq -> foo.sigmf-meta
     base, _ = os.path.splitext(data_path)
     meta_path = base + ".sigmf-meta"
@@ -32,7 +39,7 @@ def write_sigmf_meta(data_path, freq, sample_rate, *, lna=None, vga=None,
     if amp is not None:
         annotations_gains["hackrf:amp_enabled"] = bool(amp)
 
-    meta = {
+    meta: dict[str, Any] = {
         "global": {
             "core:datatype": datatype,
             "core:sample_rate": float(sample_rate),
@@ -50,6 +57,14 @@ def write_sigmf_meta(data_path, freq, sample_rate, *, lna=None, vga=None,
         ],
         "annotations": [],
     }
+    # SigMF requires any non-core namespace used in the file to be declared in
+    # core:extensions, or strict validators reject it. We only emit hackrf:*
+    # keys when gains are supplied, so declare the extension exactly then.
+    # optional=True: a reader can decode the IQ without understanding hackrf:*.
+    if annotations_gains:
+        meta["global"]["core:extensions"] = [
+            {"name": "hackrf", "version": "1.0.0", "optional": True}
+        ]
     if extra:
         meta["global"].update(extra)
 
@@ -58,7 +73,7 @@ def write_sigmf_meta(data_path, freq, sample_rate, *, lna=None, vga=None,
     return meta_path
 
 
-def read_sigmf_meta(path: str) -> dict:
+def read_sigmf_meta(path: str) -> dict[str, Any]:
     """Read a .sigmf-meta sidecar back into a dict.
 
     Accepts either the meta path itself or the data path (foo.iq is mapped

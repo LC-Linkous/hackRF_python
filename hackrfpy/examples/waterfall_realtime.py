@@ -10,6 +10,10 @@
 #   sweep pass can be partial at the flush boundary, so every spectrum line is
 #   conformed to a fixed width before being stacked into the image (a naive
 #   np.array(history) crashes on the resulting ragged rows).
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import numpy as np
 import matplotlib.pyplot as plt

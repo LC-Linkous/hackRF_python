@@ -6,11 +6,14 @@
 #   amortizing the per-capture startup cost. Verifies exact-count reads from
 #   a SINGLE process launch, the blocks()/callback() access patterns, the
 #   read-size tunability, and clean close.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import numpy as np
 
-from hackrfpy import HackRF
 
 
 def _streaming_device(stub_device, nbytes=200_000):
@@ -102,3 +105,32 @@ def test_receiver_records_params_for_calibration(stub_device):
         assert h.last_params["vga"] == 20
         # and the calibration helper can read them back
         assert h.relative_power_db(-6.0) == -6.0 - 36.0
+
+
+# ---- atexit backstop contract ----------------------------------------------
+def test_receiver_satisfies_the_live_backstop(stub_device):
+    # REGRESSION: PersistentReceiver registers itself in core._LIVE, whose atexit
+    # hook does `if h.is_alive(): h.stop()`. is_alive() was missing entirely, so
+    # the AttributeError was swallowed by the hook's bare `except Exception` and
+    # an orphaned receiver was NEVER reaped on interpreter shutdown.
+    from hackrfpy.core import _LIVE, _stop_all_live
+    h = _streaming_device(stub_device)
+    recv = h.open_receiver(433.92e6, 8e6)
+    recv.read(16)                                  # opens the stream
+    assert recv.is_alive()
+    assert recv in set(_LIVE)                      # registered on the backstop
+    _stop_all_live()                               # what atexit runs
+    assert not recv.is_alive(), "backstop did not reap the live receiver"
+
+
+def test_read_after_close_raises_typed_error(stub_device):
+    # Previously fell through _ensure_open with self._gen None and blew up on
+    # `for chunk in None` -> raw TypeError. Now a typed, actionable error.
+    from hackrfpy.exceptions import HackRFDeviceError
+    import pytest
+    h = _streaming_device(stub_device)
+    recv = h.open_receiver(433.92e6, 8e6)
+    recv.read(16)
+    recv.close()
+    with pytest.raises(HackRFDeviceError, match="closed"):
+        recv.read(16)

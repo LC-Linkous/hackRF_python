@@ -7,13 +7,16 @@
 #   return_params tuple, and the version feature-probe. Cross-platform
 #   stubs (conftest.stub_device) so the process-lifecycle ones run on
 #   Windows too.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import time
 import weakref
 
 import numpy as np
-import pytest
 
 from hackrfpy import HackRF, constants as C
 import hackrfpy.core as core
@@ -42,12 +45,16 @@ def test_features_unknown_version_is_optimistic_but_marked():
 
 
 # ---- parameter readback ----------------------------------------------------
-def test_last_params_records_snapped_values(monkeypatch):
+def test_last_params_records_snapped_values(monkeypatch, tmp_path):
     h = HackRF()
     monkeypatch.setattr(h, "_run", lambda *a, **k: ("", "", 0))
     monkeypatch.setattr(h, "estimate_capture", lambda *a, **k: {
         "total_bytes": 0, "bytes_per_sec": 1, "seconds": 0, "free_bytes": 1})
-    h.capture(433.92e6, 8e6, num_samples=1000, lna=30, vga=20)
+    # out= into tmp_path: capture() writes a SigMF sidecar next to the data
+    # file, and the default (out="capture.iq") dropped capture.sigmf-meta into
+    # the repo working directory on every test run.
+    h.capture(433.92e6, 8e6, num_samples=1000, lna=30, vga=20,
+              out=str(tmp_path / "capture.iq"))
     assert h.last_params["lna"] == 24
     assert h.last_params["freq"] == 433_920_000
     assert h.last_params["mode"] == "rx"

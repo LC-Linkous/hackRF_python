@@ -21,6 +21,10 @@
 #     uv run python examples/benchmark.py
 #     uv run python examples/benchmark.py --rate 20e6 --seconds 3
 #     uv run python examples/benchmark.py --tools-dir "C:\hackrf-tools-windows"
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import argparse
 import sys
@@ -88,7 +92,7 @@ def bench_drop_test(h, rate, seconds):
         if steady_rate >= rate / 1e6 * 0.95:
             print(f"   -> sustains {rate/1e6:g} Msps in steady state")
         else:
-            print(f"   -> steady rate below target; possible real limit here")
+            print("   -> steady rate below target; possible real limit here")
 
     # Drop detection: authoritative hackrf_debug -S shortfall count + the
     # hackrf_transfer 'overruns' count from stderr.
@@ -105,10 +109,10 @@ def bench_drop_test(h, rate, seconds):
         pass
 
     if got >= n * 0.999:
-        print(f"   note: ~100% of requested samples received -- no bulk loss")
+        print("   note: ~100% of requested samples received -- no bulk loss")
     if shortfall is not None:
         if shortfall == 0:
-            print(f"   hackrf_debug -S: 0 shortfalls -- clean")
+            print("   hackrf_debug -S: 0 shortfalls -- clean")
         elif shortfall <= 3:
             print(f"   hackrf_debug -S: {shortfall} shortfall(s) -- likely a "
                   f"startup transient, not sustained loss")

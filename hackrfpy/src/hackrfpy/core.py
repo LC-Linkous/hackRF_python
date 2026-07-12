@@ -14,15 +14,24 @@
 #   (sweep CSV), or open-ended (rx until stopped). So _run takes a `mode`
 #   argument the way a serial wrapper takes a length flag.
 #
-#   Author(s): <you>
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
+import atexit
+import logging
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import weakref
+from types import TracebackType
+from typing import Any, Callable, Generator, Literal, Protocol
 
 import numpy as np
 
@@ -30,13 +39,47 @@ from . import constants as C
 from .exceptions import (
     HackRFValueError, HackRFModeError, HackRFDeviceError, HackRFEnvironmentError,
 )
+from ._commands.info import InfoMixin
+from ._commands.capture import CaptureMixin
+from ._commands.transmit import TransmitMixin
+from ._commands.sweep import SweepMixin
+from ._commands.device import DeviceMixin
+
+
+# ---- diagnostics channel ----------------------------------------------------
+# Library diagnostics go through logging, not print(), so a consumer can route,
+# filter, or silence them. Two rules hold, and the tests pin both:
+#
+#   1. Diagnostics NEVER touch stdout. stdout is for DATA (sweep CSV, an
+#      IQ stream on `-r -`) and for explicitly-requested output (a --print-cmd
+#      preview). `hrf sweep -v > out.csv` must not put "[*] mode: rx" in the CSV.
+#   2. Warnings fire regardless of verbose. A safety notice that only appears in
+#      verbose mode is, in practice, a silent warning.
+#
+# No NullHandler is installed on purpose: with no handler anywhere, logging's
+# last-resort handler emits WARNING+ to stderr on its own, which preserves the
+# "warnings always show, zero setup required" contract for plain scripts.
+log = logging.getLogger("hackrfpy")
+
+
+def _ensure_console_logging() -> None:
+    # The last-resort handler only emits WARNING and above, so verbose=True in a
+    # plain script would otherwise print nothing at INFO. Attach a stderr handler
+    # -- but ONLY if nobody has configured logging (neither our logger nor the
+    # root). If the host application owns logging, stay out of its way and just
+    # let records propagate.
+    if log.handlers or logging.getLogger().handlers:
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(message)s"))   # bare: no level prefix
+    log.addHandler(handler)
 
 # ---- platform interrupt plumbing -------------------------------------------
 # hackrf_* tools flush + close cleanly on SIGINT. On Windows SIGINT can't be
 # delivered to a child; the equivalent is CTRL_BREAK_EVENT, which requires
 # the child to be in its own process group. Best-effort: exercised on POSIX,
 # untested on Windows.
-if os.name == "nt":  # pragma: no cover
+if sys.platform == "win32":  # pragma: no cover
     _CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP
     _INTERRUPT_SIGNAL = signal.CTRL_BREAK_EVENT
 else:
@@ -44,7 +87,7 @@ else:
     _INTERRUPT_SIGNAL = signal.SIGINT
 
 
-def _interrupt(proc):
+def _interrupt(proc: subprocess.Popen[Any]) -> None:
     proc.send_signal(_INTERRUPT_SIGNAL)
 
 
@@ -64,18 +107,23 @@ def _interrupt(proc):
 # interference problem). RX handles are registered by default but can opt out
 # (an orphaned receiver only wastes disk, and fire-and-forget is occasionally
 # wanted).
-import atexit
-import weakref
+class _Stoppable(Protocol):
+    # What the atexit backstop actually needs. _Process and PersistentReceiver
+    # both satisfy it; a Protocol keeps _LIVE honest about holding both without
+    # forcing an inheritance relationship between them.
+    def is_alive(self) -> bool: ...
+    def stop(self) -> Any: ...
 
-_LIVE = weakref.WeakSet()
+
+_LIVE: weakref.WeakSet[_Stoppable] = weakref.WeakSet()
 
 
-def _register_live(proc_handle):
+def _register_live(proc_handle: _Stoppable) -> None:
     _LIVE.add(proc_handle)
 
 
 @atexit.register
-def _stop_all_live():
+def _stop_all_live() -> None:
     for h in list(_LIVE):
         try:
             if h.is_alive():
@@ -84,11 +132,12 @@ def _stop_all_live():
             pass  # best-effort on the way down; never raise from atexit
 
 
-from ._commands.info import InfoMixin
-from ._commands.capture import CaptureMixin
-from ._commands.transmit import TransmitMixin
-from ._commands.sweep import SweepMixin
-from ._commands.device import DeviceMixin
+# Upper bound on retained drained output per stream (stdout / stderr). The
+# handle-mode drain and the streaming-mode stderr tail both cap here so a
+# long-lived RX/TX handle can't grow memory without bound (hackrf_transfer
+# prints a stats line every second for the life of the process). We keep the
+# most-recent bytes -- enough for an error tail -- and drop older ones.
+_DRAIN_CAP = 64 * 1024
 
 
 class _Process:
@@ -100,13 +149,14 @@ class _Process:
     # prints a stats line every second; with an undrained PIPE the 64 KB buffer
     # eventually fills and the child blocks on write, silently stalling a
     # long-running capture. Draining as we go removes that failure mode.
-    def __init__(self, proc, owner, kind="rx"):
+    def __init__(self, proc: subprocess.Popen[Any], owner: HackRF,
+                 kind: str = "rx") -> None:
         self._proc = proc
         self._owner = owner
         self._kind = kind          # "rx" | "tx" -- for atexit messaging
         self._stopped = False
-        self._out_chunks = []
-        self._err_chunks = []
+        self._out_chunks: list[bytes] = []
+        self._err_chunks: list[bytes] = []
         self._threads = []
         for stream, sink in ((proc.stdout, self._out_chunks),
                              (proc.stderr, self._err_chunks)):
@@ -118,17 +168,22 @@ class _Process:
             self._threads.append(t)
 
     @staticmethod
-    def _drain(stream, sink):
+    def _drain(stream: Any, sink: list[bytes]) -> None:
         try:
             for chunk in iter(lambda: stream.read(65536), b""):
                 sink.append(chunk)
+                # Bound retained output: drop oldest chunks once over the cap,
+                # always keeping at least the latest one. Prevents unbounded
+                # growth on open-ended handles (see _DRAIN_CAP).
+                while sum(len(c) for c in sink) > _DRAIN_CAP and len(sink) > 1:
+                    sink.pop(0)
         except (OSError, ValueError):
             pass  # pipe closed under us during shutdown
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
         return self._proc.poll() is None
 
-    def stop(self, grace=2.0):
+    def stop(self, grace: float = 2.0) -> tuple[bytes, bytes, int | None]:
         # SIGINT lets hackrf_transfer flush + close the file cleanly so the
         # IQ stream isn't truncated mid-sample-pair.
         if self._proc.poll() is None:
@@ -141,12 +196,12 @@ class _Process:
         _LIVE.discard(self)         # no longer needs the atexit backstop
         return self.result()
 
-    def wait(self):
+    def wait(self) -> tuple[bytes, bytes, int | None]:
         self._proc.wait()
         _LIVE.discard(self)
         return self.result()
 
-    def result(self):
+    def result(self) -> tuple[bytes, bytes, int | None]:
         for t in self._threads:
             t.join(timeout=2.0)
         out = b"".join(self._out_chunks)
@@ -154,19 +209,25 @@ class _Process:
         return out, err, self._proc.returncode
 
     # ---- context manager (Tier A): guaranteed reap on block exit -----------
-    def __enter__(self):
+    def __enter__(self) -> _Process:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: type[BaseException] | None,
+                 exc: BaseException | None,
+                 tb: TracebackType | None) -> Literal[False]:
         if not self._stopped:
             self.stop()
         return False  # never suppress the caller's exception
 
 
 class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
-    def __init__(self, tools_dir=None, verbose=False, serial=None):
+    def __init__(self, tools_dir: str | None = None, verbose: bool = False,
+                 serial: str | None = None) -> None:
         # ---- feedback ----
-        self.verboseEnabled = verbose
+        # via set_verbose so that HackRF(verbose=True) wires up the console
+        # handler exactly like an explicit set_verbose(True) call would.
+        self.verboseEnabled = False
+        self.set_verbose(verbose)
 
         # ---- device selection (multi-board setups) ----
         # When set, `-d <serial>` is injected into every tool that supports
@@ -200,9 +261,10 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # after snapping / auto-derivation, so a script can see what really
         # happened (e.g. a requested lna=30 that snapped to 24). None until the
         # first rx/tx/sweep call on this instance.
-        self.last_params = None
+        self.last_params: dict[str, Any] | None = None
+        self._probed: dict[str, Any] | None = None   # set by from_device()
 
-    def _record_params(self, **params):
+    def _record_params(self, **params: Any) -> dict[str, Any]:
         # Single place the mixins call to publish post-snap values. Returns the
         # dict so callers can also use it inline if they want.
         self.last_params = params
@@ -211,38 +273,47 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     # Feedback
     # =================================================================
-    def set_verbose(self, verbose=True):
+    def set_verbose(self, verbose: bool = True) -> None:
         self.verboseEnabled = verbose
+        if verbose:
+            # Make INFO actually visible in a plain script (see
+            # _ensure_console_logging). No-op if the host app configured logging.
+            _ensure_console_logging()
+            if log.getEffectiveLevel() > logging.INFO:
+                log.setLevel(logging.INFO)
 
-    def get_verbose(self):
+    def get_verbose(self) -> bool:
         return self.verboseEnabled
 
-    def print_message(self, msg):
+    def print_message(self, msg: str) -> None:
+        # Progress / status chatter. INFO, and gated on verbose so the level and
+        # the flag agree. Goes to stderr (never stdout) -- see the module note.
         if self.verboseEnabled:
-            print(msg)
+            log.info(msg)
 
-    def warn(self, msg):
+    def warn(self, msg: str) -> None:
         # Safety / correctness warnings the user must see REGARDLESS of verbose.
         # (A degraded-results or out-of-spec notice that only prints in verbose
-        # mode is, in practice, a silent warning.) Routed to stderr so it never
-        # pollutes stdout data streams (sweep CSV, rx -r -).
-        print(f"[!] {msg}", file=sys.stderr)
+        # mode is, in practice, a silent warning.) WARNING level, so it survives
+        # with no logging setup at all via logging's last-resort stderr handler.
+        # The "[!] " marker lives in the message so it shows under any formatter.
+        log.warning(f"[!] {msg}")
 
     # =================================================================
     # Operating mode machine
     # =================================================================
     @property
-    def mode(self):
+    def mode(self) -> str:
         return self._mode
 
     @mode.setter
-    def mode(self, value):
+    def mode(self, value: str) -> None:
         self.set_mode(value)
 
-    def get_mode(self):
+    def get_mode(self) -> str:
         return self._mode
 
-    def set_mode(self, value):
+    def set_mode(self, value: str) -> str:
         value = str(value).lower()
         if value not in C.MODES:
             raise HackRFValueError(
@@ -254,7 +325,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         self.print_message(f"[*] mode -> {value}")
         return self._mode
 
-    def restore_mode(self, value):
+    def restore_mode(self, value: str) -> str:
         # Rehydrate previously-persisted mode WITHOUT the switch ceremony
         # (no banner, no chatter). For the CLI restoring state between
         # invocations; the banner already fired at the original `mode tx`.
@@ -265,14 +336,14 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         self._mode = value
         return self._mode
 
-    def require_mode(self, needed):
+    def require_mode(self, needed: str) -> None:
         if self._mode != needed:
             raise HackRFModeError(
                 f"operation requires '{needed}' mode but device is in "
                 f"'{self._mode}' mode. Switch first (set_mode('{needed}') or "
                 f"`hrf mode {needed}`).")
 
-    def _tx_safety_banner(self):
+    def _tx_safety_banner(self) -> None:
         # Always printed (not gated on verbose): switching to TX is a moment
         # that deserves a clear, one-time notice regardless of verbosity.
         print("=" * 64)
@@ -285,7 +356,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     # Validation layer
     # =================================================================
-    def _check_hard_range(self, name, value, lo, hi, warn_below=None):
+    def _check_hard_range(self, name: str, value: float, lo: float, hi: float,
+                          warn_below: float | None = None) -> float:
         # Reject-by-default outside [lo, hi]; --force downgrades to a warning.
         # warn_below: a soft floor that only ever warns (e.g. low sample rate).
         value = float(value)
@@ -303,7 +375,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 f"{warn_below:g}; results may be degraded.")
         return value
 
-    def _snap_gain(self, name, value, table):
+    def _snap_gain(self, name: str, value: int,
+                   table: tuple[int, int, int]) -> int:
         # Round DOWN to the device's real step and notify. This is the honest
         # "what you'll actually get" value, matching the silicon. A request
         # that snaps to a DIFFERENT value is surfaced via warn() (not just
@@ -321,7 +394,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 f"(snapped to device step <= request, range [{lo},{hi}]/{step}dB)")
         return snapped
 
-    def _snap_baseband(self, value):
+    def _snap_baseband(self, value: float) -> float:
         # Snap an explicit baseband BW to the nearest supported value.
         opts = C.BASEBAND_FILTER_BW_HZ
         nearest = min(opts, key=lambda o: abs(o - value))
@@ -331,7 +404,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 f"(nearest supported)")
         return nearest
 
-    def _auto_baseband(self, sample_rate, explicit=None):
+    def _auto_baseband(self, sample_rate: float,
+                       explicit: float | None = None) -> float:
         # If unset, derive ~0.75x sample rate snapped to a supported BW. If set
         # explicitly, snap it and warn when it exceeds the sample rate (a
         # likely mistake -- you can't filter wider than you sample).
@@ -345,7 +419,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 f"{sample_rate/1e6:g} Msps.")
         return bw
 
-    def validate_rx(self, freq, sample_rate, lna, vga):
+    def validate_rx(self, freq: float, sample_rate: float, lna: int,
+                    vga: int) -> tuple[float, float, int, int]:
         freq = self._check_hard_range("frequency", freq,
                                       C.FREQ_MIN_HZ, C.FREQ_MAX_HZ)
         sample_rate = self._check_hard_range("sample_rate", sample_rate,
@@ -354,7 +429,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         vga = self._snap_gain("vga_gain", vga, C.VGA_GAIN)
         return freq, sample_rate, lna, vga
 
-    def validate_tx(self, freq, sample_rate, txvga, amp):
+    def validate_tx(self, freq: float, sample_rate: float, txvga: int,
+                    amp: bool) -> tuple[float, float, int, bool]:
         # NOTE: TX frequency uses the full device range and is never policed by
         # --force; the only gate is being in TX mode. The gain ceiling guards
         # against an order-of-magnitude fat-finger.
@@ -377,7 +453,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     # Binary resolution
     # =================================================================
-    def resolve(self, key):
+    def resolve(self, key: str) -> str:
         # key is a TOOLS key ("transfer", "info", ...). Returns the full path
         # or raises HackRFDeviceError with an actionable message.
         name = C.TOOLS[key]
@@ -407,7 +483,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Capability probe
     # =================================================================
     @classmethod
-    def from_device(cls, *, tools_dir=None, verbose=False, serial=None):
+    def from_device(cls, *, tools_dir: str | None = None, verbose: bool = False,
+                    serial: str | None = None) -> HackRF:
         # Build a HackRF and immediately probe the attached board so callers
         # get a device whose reported firmware is known up front. Unlike the
         # bare constructor (which touches nothing), this RUNS hackrf_info, so
@@ -415,13 +492,14 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # present. Use it when you want a fail-fast handle for scripting.
         h = cls(tools_dir=tools_dir, verbose=verbose, serial=serial)
         info = h.info()                      # raises if no tools / no board
+        assert isinstance(info, dict)        # raw=False -> parsed dict
         if not info.get("boards"):
             raise HackRFDeviceError("no HackRF board detected")
         h._probed = info
         h._warn_if_firmware_stale(info)
         return h
 
-    def _warn_if_firmware_stale(self, info):
+    def _warn_if_firmware_stale(self, info: dict[str, Any]) -> None:
         # The subprocess approach is firmware-version sensitive: '-r -' stdout
         # streaming and 'sweep -N' need reasonably modern tools. Surface a
         # warning (not a raise) so old boards still work for what they can do.
@@ -437,9 +515,10 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     # The device-I/O choke point
     # =================================================================
-    def _run(self, argv, *, mode="blocking", duration=None,
-             text=False, check=True, print_cmd=False, kind="rx",
-             read_samples=65536):
+    def _run(self, argv: list[Any], *, mode: str = "blocking",
+             duration: float | None = None, text: bool = False,
+             check: bool = True, print_cmd: bool = False, kind: str = "rx",
+             read_samples: int = 65536) -> Any:
         # argv: full command list whose [0] is a TOOLS key, e.g.
         #       ["transfer", "-r", "out.iq", ...]; resolved to a real path here.
         #
@@ -509,7 +588,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return out, err, rc
 
     @staticmethod
-    def _sigint_and_reap(proc, grace=5.0):
+    def _sigint_and_reap(proc: subprocess.Popen[Any],
+                         grace: float = 5.0) -> tuple[Any, Any]:
         # SIGINT (clean flush/close in hackrf_*), bounded wait, escalate.
         _interrupt(proc)
         try:
@@ -518,7 +598,8 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
             proc.terminate()
             return proc.communicate()
 
-    def _stream(self, resolved, text=False, read_samples=65536):
+    def _stream(self, resolved: list[str], text: bool = False,
+                read_samples: int = 65536) -> Generator[Any, None, None]:
         # Generator twin of _run. Launch, yield stdout as it arrives, clean up
         # on the caller breaking out (GeneratorExit) so we never leave a
         # transmitting/receiving process orphaned.
@@ -536,10 +617,14 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=text,
                                 creationflags=_CREATION_FLAGS)
-        err_tail = []
-        err_cap = 64 * 1024
+        # PIPE is always requested above, so these are never None. Typed Any
+        # because the concrete class depends on `text`: BufferedReader in binary
+        # mode (which is where .read1 comes from) vs TextIOWrapper in text mode.
+        stdout: Any = proc.stdout
+        err_tail: list[Any] = []
+        err_cap = _DRAIN_CAP
 
-        def _eat(stream, sink):
+        def _eat(stream: Any, sink: list[Any]) -> None:
             try:
                 for data in iter(lambda: stream.read(4096), b"" if not text else ""):
                     sink.append(data)
@@ -554,7 +639,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         broke_out = True
         try:
             if text:
-                for line in proc.stdout:
+                for line in stdout:
                     yield line
             else:
                 # read1() returns whatever is available after ONE underlying
@@ -565,7 +650,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 # until a full 128 KB accumulated. Cap the request so we never
                 # split an I/Q pair across yields.
                 while True:
-                    chunk = proc.stdout.read1(C.BYTES_PER_SAMPLE * read_samples)
+                    chunk = stdout.read1(C.BYTES_PER_SAMPLE * read_samples)
                     if not chunk:
                         break
                     yield chunk
@@ -589,7 +674,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # =================================================================
     # Shared helpers used by mixins
     # =================================================================
-    def decode_iq(self, raw):
+    def decode_iq(self, raw: bytes) -> np.ndarray:
         # HackRF native format -> complex64. Interleaved int8 I,Q,I,Q...
         # Guard against an odd trailing byte (truncated final pair).
         #
@@ -617,7 +702,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # examples/calibrate.py.
 
     @staticmethod
-    def power_dbfs(iq):
+    def power_dbfs(iq: np.ndarray) -> float:
         # Mean power of a complex64 block in dBFS (dB relative to full scale).
         # 0 dBFS == |amplitude| 1.0 (ADC full scale). Always <= 0 for real
         # captures. This is the raw, UNCALIBRATED reading.
@@ -628,15 +713,19 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return 10.0 * np.log10(power + 1e-20)
 
     @staticmethod
-    def gain_db(lna=0, vga=0, amp=False):
+    def gain_db(lna: int = 0, vga: int = 0, amp: bool = False) -> float:
         # Total RX gain through the chain in dB: LNA (IF) + VGA (baseband) +
         # the fixed ~14 dB front-end amp if enabled. This is the quantity that
         # makes a raw dBFS reading ambiguous -- the SAME signal reads ~36 dB
         # different between min and max gain.
         return float(lna) + float(vga) + (C.AMP_DB if amp else 0.0)
 
-    def relative_power_db(self, iq_or_dbfs, *, lna=None, vga=None, amp=None,
-                          offset_db=0.0, freq_hz=None, freq_correction=None):
+    def relative_power_db(self, iq_or_dbfs: np.ndarray | float, *,
+                          lna: int | None = None, vga: int | None = None,
+                          amp: bool | None = None, offset_db: float = 0.0,
+                          freq_hz: float | None = None,
+                          freq_correction: Callable[[float], float] | None = None
+                          ) -> float:
         # Gain-normalized power: subtract the gain chain so readings taken at
         # DIFFERENT gain settings are directly comparable. This is the Level 1
         # relative calibration -- still not absolute dBm, but consistent.
@@ -668,10 +757,10 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
             value -= float(freq_correction(freq_hz))
         return value
 
-        return load_iq(path, count=count, offset_samples=offset_samples)
-
-    def estimate_capture(self, sample_rate, num_samples=None, duration=None,
-                         path="."):
+    def estimate_capture(self, sample_rate: float,
+                         num_samples: int | None = None,
+                         duration: float | None = None,
+                         path: str = ".") -> dict[str, Any]:
         # Bytes/sec = sample_rate * 2 (int8 I + int8 Q). Returns a dict and
         # raises HackRFEnvironmentError if it would blow past free disk.
         bps = sample_rate * C.BYTES_PER_SAMPLE
@@ -697,7 +786,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 # =====================================================================
 # Module-level helpers: consume recordings WITHOUT a device / HackRF()
 # =====================================================================
-def parse_freq(txt):
+def parse_freq(txt: str | float | int) -> float:
     """Parse '433.92M', '88M', '1.09G', '2.5k', '100MHz', or plain Hz -> float Hz.
 
     Lives at module scope (not just in the CLI) so library callers can accept

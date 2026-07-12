@@ -4,6 +4,10 @@
 #   hackrfpy  'tests/test_cli_dryrun.py'
 #   --print-cmd builds the right hackrf_* argv without running anything.
 #   Skips cleanly if hackrf-tools aren't installed (resolve() would raise).
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import shutil

@@ -11,11 +11,17 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
 import re
+from typing import Any
+
+from .._host import HostOps
 
 
-class InfoMixin:
-    def info(self, raw=False, print_cmd=False):
+class InfoMixin(HostOps):
+    def info(self, raw: bool = False,
+             print_cmd: bool = False) -> dict[str, Any] | str | None:
         # Returns a parsed dict by default, or the raw text if raw=True.
         if print_cmd:
             self._run(["info"], mode="blocking", print_cmd=True)
@@ -26,11 +32,11 @@ class InfoMixin:
             return out
         return self.parse_info(out)
 
-    def get_info(self):
+    def get_info(self) -> dict[str, Any] | str | None:
         # alias
         return self.info()
 
-    def detect(self):
+    def detect(self) -> dict[str, Any]:
         # Hardware autodetection + identification, the HackRF analog of a
         # serial-port scan. The HackRF is NOT a serial device -- there are no
         # COM ports to walk -- so "detection" means: run hackrf_info, confirm
@@ -52,7 +58,7 @@ class InfoMixin:
         #     "problem": str|None,
         #   }
         from ..exceptions import HackRFDeviceError
-        result = {"found": False, "ready": False, "count": 0, "boards": [],
+        result: dict[str, Any] = {"found": False, "ready": False, "count": 0, "boards": [],
                   "tools_version": None, "libhackrf_version": None,
                   "multiple": False, "warnings": [], "problem": None}
         try:
@@ -101,7 +107,7 @@ class InfoMixin:
             result["problem"] = "no HackRF board detected (check USB / drivers)"
         return result
 
-    def identify(self, serial=None):
+    def identify(self, serial: str | None = None) -> dict[str, Any] | None:
         # Return the identity of a single board: the one matching `serial`, or
         # the first detected board if serial is None. Returns the board dict
         # from detect()["boards"], or None if not found. Convenience for "what
@@ -117,7 +123,7 @@ class InfoMixin:
         return None
 
     @staticmethod
-    def parse_info(text):
+    def parse_info(text: str) -> dict[str, Any]:
         # hackrf_info prints "Key: value" lines: a version preamble, then one
         # block per board. We keep the preamble under "library" and each board
         # under "boards". A board starts at "Found HackRF" or, for outputs that
@@ -132,10 +138,10 @@ class InfoMixin:
         #     other devices on the same USB bus. You may have problems at high
         #     sample rates.") are collected under result["warnings"] instead of
         #     being silently dropped.
-        result = {"library": {}, "boards": [], "warnings": []}
-        current = None
-        last_target = None      # dict the last key was written to
-        last_key = None         # the last key, for continuation lines
+        result: dict[str, Any] = {"library": {}, "boards": [], "warnings": []}
+        current: dict[str, Any] | None = None
+        last_target: dict[str, Any] | None = None   # dict the last key was written to
+        last_key: str | None = None                 # last key, for continuation lines
         for raw in text.splitlines():
             line = raw.strip()
             if not line:

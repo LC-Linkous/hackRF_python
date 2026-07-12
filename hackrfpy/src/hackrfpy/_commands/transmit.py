@@ -14,20 +14,35 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
+import os
+from typing import Any
+
 from .. import constants as C
+from .._host import HostOps
+from ..exceptions import HackRFEnvironmentError
 
 
-class TransmitMixin:
-    def transmit(self, freq, sample_rate, source, *, txvga=20, amp=False,
-                 bias_tee=False, baseband_bw=None, repeat=False,
-                 num_samples=None, duration=None, max_duration=None,
-                 print_cmd=False):
+class TransmitMixin(HostOps):
+    def transmit(self, freq: float, sample_rate: float, source: str, *,
+                 txvga: int = 20, amp: bool = False, bias_tee: bool = False,
+                 baseband_bw: float | None = None, repeat: bool = False,
+                 num_samples: int | None = None, duration: float | None = None,
+                 max_duration: float | None = None,
+                 print_cmd: bool = False) -> Any:
         # source: path to an int8 I/Q file to transmit.
         # max_duration: hard ceiling (seconds) enforced even for open-ended
         #   repeat transmits. A transmitter that runs until .stop() is a
         #   regulatory + hardware risk if the controlling script dies; this
         #   gives every transmit an optional dead-man bound.
         self.require_mode(C.MODE_TX)          # the gate
+        # Fail fast on a bad path BEFORE spawning hackrf_transfer, so a typo'd
+        # source raises a clean, catchable error instead of a generic non-zero
+        # exit from the tool. Skipped for print_cmd (a dry run is a pure command
+        # preview and may reference a file you haven't generated yet).
+        if not print_cmd and not os.path.isfile(source):
+            raise HackRFEnvironmentError(f"transmit source not found: {source!r}")
         freq, sample_rate, txvga, amp = self.validate_tx(
             freq, sample_rate, txvga, amp)
         bw = self._auto_baseband(sample_rate, baseband_bw)
@@ -64,15 +79,19 @@ class TransmitMixin:
         return self._run(argv, mode="handle", kind="tx")
 
     # ---- aliases ----
-    def tx(self, *a, **k):
+    def tx(self, *a: Any, **k: Any) -> Any:
         return self.transmit(*a, **k)
 
-    def transmit_file(self, freq, sample_rate, source, **k):
+    def transmit_file(self, freq: float, sample_rate: float, source: str,
+                      **k: Any) -> Any:
         return self.transmit(freq, sample_rate, source, **k)
 
-    def transmit_cw(self, freq, sample_rate, *, amplitude=127, txvga=20,
-                    amp=False, bias_tee=False, baseband_bw=None,
-                    duration=None, max_duration=None, print_cmd=False):
+    def transmit_cw(self, freq: float, sample_rate: float, *,
+                    amplitude: int = 127, txvga: int = 20, amp: bool = False,
+                    bias_tee: bool = False, baseband_bw: float | None = None,
+                    duration: float | None = None,
+                    max_duration: float | None = None,
+                    print_cmd: bool = False) -> Any:
         # Constant-wave / signal-source test mode: hackrf_transfer -c <amp>.
         # Transmits a fixed signal at `amplitude` (0-127) instead of a file.
         # TX-gated like any transmit. Useful for antenna/range testing. Open-

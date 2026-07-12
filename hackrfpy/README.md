@@ -2,6 +2,7 @@
 
 **An Unofficial Python CLI + Scripting Wrapper for the HackRF One that works on Windows**
 
+[![Tests](https://github.com/LC-Linkous/hackRF_python/actions/workflows/tests.yml/badge.svg)](https://github.com/LC-Linkous/hackRF_python/actions/workflows/tests.yml)
 [![PyPI version](https://badge.fury.io/py/hackrfpy.svg)](https://badge.fury.io/py/hackrfpy)
 [![Python versions](https://img.shields.io/pypi/pyversions/hackrfpy.svg)](https://pypi.org/project/hackrfpy/)
 [![PyPI - Wheel](https://img.shields.io/pypi/wheel/hackrfpy.svg)](https://pypi.org/project/hackrfpy/)
@@ -25,6 +26,14 @@ This repository uses official resources and documentation but is **NOT** endorse
 - **Error Handling** — a typed exception hierarchy and verbose output options
 - **CLI** — the `hrf` command-line shell over the full API
 
+## Platform support
+
+hackrfpy is developed and tested on **Windows**. Running the `hackrf-tools` binaries as subprocesses — rather than binding to `libhackrf` through a C extension — is a deliberate choice so that no compiler or build step is required, which is the main friction point for using a HackRF on Windows.
+
+The library is *written* to be cross-platform: binary discovery goes through `shutil.which`, and process control uses `SIGINT` on POSIX and `CTRL_BREAK` on Windows. The `hackrf-tools` binaries are themselves native to Linux and macOS, and the wrapper's non-hardware mechanics (binary resolution, process lifecycle, sweep streaming, IQ decode) pass in CI on Linux. So the library is **expected** to work on Linux and macOS.
+
+However, it has **not yet been verified against a real HackRF board** on Linux or macOS. Treat those platforms as **experimental** for now. If you try it there, please [open an issue](https://github.com/LC-Linkous/hackRF_python/issues) to report success or trouble — confirmation from real hardware is exactly what's needed to promote them to supported.
+
 ## Installation
 
 ```bash
@@ -39,13 +48,13 @@ pip install "hackrfpy[plotting]"
 
 Python 3.11+ is required.
 
-**You also need the `hackrf-tools` binaries**, which are *not* a pip dependency — they are installed at the OS level:
+**You also need the `hackrf-tools` binaries**, which are *not* a pip dependency — they are installed separately at the OS level. hackrfpy locates them on your `PATH` (or via a configured `tools_dir`).
 
-- **Linux:** `sudo apt install hackrf` (or your distribution's equivalent)
-- **macOS:** `brew install hackrf`
-- **Windows:** the tools are published as CI build artifacts under the [Actions tab](https://github.com/greatscottgadgets/hackrf/actions) of the HackRF repo; see the main repository README for the step-by-step.
+- **Windows** — *tested.* The tools are published as CI build artifacts under the [Actions tab](https://github.com/greatscottgadgets/hackrf/actions) of the HackRF repo; see the main repository README for the step-by-step.
+- **Linux** — *experimental, see [Platform support](#platform-support).* `sudo apt install hackrf` (or your distribution's equivalent).
+- **macOS** — *experimental, see [Platform support](#platform-support).* `brew install hackrf`.
 
-Verify the install with `hackrf_info`.
+Verify the tools are installed with `hackrf_info`.
 
 ## Quick Start
 
@@ -138,6 +147,7 @@ For comprehensive documentation, the full method reference, the CLI reference, a
 This is an unofficial community project. Contributions welcome!
 
 - Report bugs and request features on [GitHub](https://github.com/LC-Linkous/hackRF_python)
+- If you run the library on Linux or macOS, reports from real hardware are especially welcome (see [Platform support](#platform-support))
 - For device information and OFFICIAL resources, see [https://hackrf.readthedocs.io/](https://hackrf.readthedocs.io/)
   - Please do **NOT** request features or report bugs to Great Scott Gadgets or the HackRF project! This is an unofficial project and they do not maintain it.
 

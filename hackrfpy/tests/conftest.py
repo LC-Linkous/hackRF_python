@@ -5,6 +5,10 @@
 #   Shared pytest fixtures + the hardware-marker self-skip + the
 #   CROSS-PLATFORM stub-binary factory (so lifecycle/handle/stream tests
 #   run on Windows, not just where bash exists).
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import os

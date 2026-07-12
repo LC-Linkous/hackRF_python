@@ -28,6 +28,10 @@
 #       uv run python examples/collect_sample_data.py --seconds 1.0 --sample-rate 4e6
 #
 #   (Use `uv run` so the project environment with numpy is used.)
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import argparse

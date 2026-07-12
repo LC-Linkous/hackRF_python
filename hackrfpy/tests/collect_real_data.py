@@ -23,6 +23,10 @@
 #       python tests/collect_real_data.py --tools-dir "C:\hackrf-tools-windows"
 #       python tests/collect_real_data.py --anonymize        # scrub serials
 #       python tests/collect_real_data.py --sweep-band 88:108 --rx-freq 100e6
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
 import argparse
@@ -42,7 +46,7 @@ from hackrfpy import HackRF                       # noqa: E402
 from hackrfpy.exceptions import HackRFError       # noqa: E402
 
 try:
-    import numpy as np                            # noqa: E402
+    import numpy as np                            # noqa: E402, F401
 except ModuleNotFoundError:
     sys.stderr.write(
         "ERROR: numpy is not available in this environment.\n"

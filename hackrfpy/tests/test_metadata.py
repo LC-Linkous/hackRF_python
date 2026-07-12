@@ -3,10 +3,12 @@
 ##--------------------------------------------------------------------\
 #   hackrfpy  'tests/test_metadata.py'
 #   SigMF sidecar round-trips, and preset resolution/override. Device-free.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
-import json
-import os
 
 import pytest
 

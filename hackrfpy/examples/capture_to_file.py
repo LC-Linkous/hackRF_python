@@ -6,6 +6,10 @@
 #   recording parameters. Neither needs a device or a HackRF() instance,
 #   so any downstream consumer can use them standalone.
 #   Built ON TOP of the library; not required by it.
+#
+#
+#   Author(s): Lauren Linkous
+#   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 import numpy as np
 from hackrfpy import HackRF, load_iq, read_sigmf_meta
