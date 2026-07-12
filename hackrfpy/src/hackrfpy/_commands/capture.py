@@ -18,18 +18,30 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING, Any, Callable, Generator
+
+import numpy as np
 
 from .. import constants as C
+from .._host import HostOps
 from ..sigmf import write_sigmf_meta
 
+if TYPE_CHECKING:
+    from .._receiver import PersistentReceiver
+    from .._stream_ctx import StreamCtx
 
-class CaptureMixin:
-    def capture(self, freq, sample_rate, *, out="capture.iq",
-                num_samples=None, duration=None,
-                lna=16, vga=20, amp=False, bias_tee=False,
-                baseband_bw=None, to_stdout=False, sigmf=True,
-                segment_secs=None, print_cmd=False):
+
+class CaptureMixin(HostOps):
+    def capture(self, freq: float, sample_rate: float, *,
+                out: str = "capture.iq", num_samples: int | None = None,
+                duration: float | None = None, lna: int = 16, vga: int = 20,
+                amp: bool = False, bias_tee: bool = False,
+                baseband_bw: float | None = None, to_stdout: bool = False,
+                sigmf: bool = True, segment_secs: float | None = None,
+                print_cmd: bool = False) -> Any:
         self.require_mode(C.MODE_RX)
         freq, sample_rate, lna, vga = self.validate_rx(freq, sample_rate, lna, vga)
         bw = self._auto_baseband(sample_rate, baseband_bw)
@@ -57,7 +69,7 @@ class CaptureMixin:
             # The inner stream generator is closed EXPLICITLY on the way out;
             # leaving it to GC can orphan a receiving hackrf_transfer after
             # the caller breaks out of the loop.
-            def _gen():
+            def _gen() -> Generator[np.ndarray, None, None]:   # decoded, not raw
                 tail = b""
                 inner = self._run(argv, mode="stream")
                 try:
@@ -97,17 +109,21 @@ class CaptureMixin:
         return res
 
     # ---- aliases ----
-    def rx(self, *a, **k):
+    def rx(self, *a: Any, **k: Any) -> Any:
         return self.capture(*a, **k)
 
-    def capture_samples(self, freq, sample_rate, num_samples, **k):
+    def capture_samples(self, freq: float, sample_rate: float,
+                        num_samples: int, **k: Any) -> Any:
         return self.capture(freq, sample_rate, num_samples=num_samples, **k)
 
-    def capture_seconds(self, freq, sample_rate, duration, **k):
+    def capture_seconds(self, freq: float, sample_rate: float,
+                        duration: float, **k: Any) -> Any:
         return self.capture(freq, sample_rate, duration=duration, **k)
 
-    def scan_frequencies(self, freqs, sample_rate, num_samples, *,
-                         on_capture=None, **k):
+    def scan_frequencies(self, freqs: list[float], sample_rate: float,
+                         num_samples: int, *,
+                         on_capture: Callable[..., Any] | None = None,
+                         **k: Any) -> dict[float, np.ndarray] | None:
         # Sequentially capture a fixed sample count at each frequency in
         # `freqs`, retuning between them. This does NOT close the gapless-
         # retune gap (each retune is a fresh hackrf_transfer with a short
@@ -130,8 +146,8 @@ class CaptureMixin:
         return results if on_capture is None else None
 
     # ---- in-memory + context-managed entry points ----
-    def capture_array(self, freq, sample_rate, num_samples, *,
-                      return_params=False, **k):
+    def capture_array(self, freq: float, sample_rate: float, num_samples: int,
+                      *, return_params: bool = False, **k: Any) -> Any:
         # Scripting entry point: return EXACTLY num_samples complex64 samples
         # in RAM, no file. Built on the stdout-stream path so it shares the
         # odd-byte carry + clean-reap logic. The stream is closed as soon as
@@ -164,8 +180,10 @@ class CaptureMixin:
             return iq, self.last_params
         return iq
 
-    def open_receiver(self, freq, sample_rate, *, lna=16, vga=20, amp=False,
-                      baseband_bw=None, read_samples=131072):
+    def open_receiver(self, freq: float, sample_rate: float, *, lna: int = 16,
+                      vga: int = 20, amp: bool = False,
+                      baseband_bw: float | None = None,
+                      read_samples: int = 131072) -> PersistentReceiver:
         # Open a PERSISTENT fixed-frequency receiver: one long-lived
         # hackrf_transfer you drain in segments over time, so you don't pay the
         # ~1-2 s process spin-up per capture. Use as a context manager:
@@ -184,7 +202,8 @@ class CaptureMixin:
                                   amp=amp, baseband_bw=baseband_bw,
                                   read_samples=read_samples)
 
-    def capture_stream(self, freq, sample_rate, **k):
+    def capture_stream(self, freq: float, sample_rate: float,
+                       **k: Any) -> StreamCtx:
         # Context manager wrapping the live stdout stream so the receiving
         # hackrf_transfer is ALWAYS reaped on exit, even on exception:
         #     with h.capture_stream(433.92e6, 8e6) as blocks:
@@ -194,8 +213,10 @@ class CaptureMixin:
         gen = self.capture(freq, sample_rate, to_stdout=True, **k)
         return StreamCtx(gen)
 
-    def capture_callback(self, freq, sample_rate, on_block, *,
-                         max_samples=None, max_blocks=None, **k):
+    def capture_callback(self, freq: float, sample_rate: float,
+                         on_block: Callable[..., Any], *,
+                         max_samples: int | None = None,
+                         max_blocks: int | None = None, **k: Any) -> int:
         # Binder-style ergonomics over the subprocess stream: instead of the
         # caller writing the receive loop, register a callback that fires with
         # each decoded complex64 block as it arrives. This is the usability
@@ -228,8 +249,9 @@ class CaptureMixin:
         return total
 
     # ---- internals ----
-    def _rx_argv(self, freq, sample_rate, target, lna, vga, amp, bias_tee,
-                 bw, num_samples):
+    def _rx_argv(self, freq: float, sample_rate: float, target: str, lna: int,
+                 vga: int, amp: bool, bias_tee: bool, bw: float,
+                 num_samples: int | None) -> list[Any]:
         argv = ["transfer", "-r", target,
                 "-f", int(freq), "-s", int(sample_rate),
                 "-l", lna, "-g", vga,
@@ -241,8 +263,10 @@ class CaptureMixin:
             argv += ["-n", int(num_samples)]
         return argv
 
-    def _capture_segmented(self, freq, sample_rate, out, segment_secs, lna,
-                           vga, amp, bias_tee, bw, sigmf, print_cmd):
+    def _capture_segmented(self, freq: float, sample_rate: float, out: str,
+                           segment_secs: float, lna: int, vga: int, amp: bool,
+                           bias_tee: bool, bw: float, sigmf: bool,
+                           print_cmd: bool) -> list[str]:
         # Rolling files out_000.iq, out_001.iq, ... each `segment_secs` long.
         # Each segment is a bounded blocking capture, so files are whole.
         base, ext = os.path.splitext(out)

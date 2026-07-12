@@ -13,12 +13,22 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
+from typing import Any, Callable, Generator
+
 from .. import constants as C
+from .._host import HostOps
+from ..exceptions import HackRFValueError
 
 
-class SweepMixin:
-    def sweep(self, f_min_hz, f_max_hz, *, bin_width=None, lna=16, vga=20,
-              amp=False, one_shot=False, num_sweeps=None, print_cmd=False):
+class SweepMixin(HostOps):
+    def sweep(self, f_min_hz: float, f_max_hz: float, *,
+              bin_width: float | None = None, lna: int = 16, vga: int = 20,
+              amp: bool = False, one_shot: bool = False,
+              num_sweeps: int | None = None,
+              print_cmd: bool = False
+              ) -> Generator[dict[str, Any], None, None] | None:
         # GENERATOR yielding parsed rows (dicts). Validate the band edges with
         # the same hard-range logic, snap gains. hackrf_sweep takes the range
         # in MHz as f_min:f_max.
@@ -55,9 +65,9 @@ class SweepMixin:
 
         if print_cmd:
             self._run(argv, mode="blocking", print_cmd=True)
-            return
+            return None
 
-        def _gen():
+        def _gen() -> Generator[dict[str, Any], None, None]:
             # Explicitly close the inner stream generator on the way out.
             # Relying on GC to do it is not deterministic, and an unclosed
             # inner generator leaves hackrf_sweep running ORPHANED after the
@@ -79,13 +89,21 @@ class SweepMixin:
                 inner.close()
         return _gen()
 
-    def sweep_collect(self, f_min_hz, f_max_hz, num_sweeps=1, **k):
+    def sweep_collect(self, f_min_hz: float, f_max_hz: float,
+                      num_sweeps: int = 1, **k: Any) -> list[dict[str, Any]]:
         # Convenience: collect a bounded number of sweeps into a list.
         k.pop("num_sweeps", None)
-        return list(self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k))
+        rows = self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k)
+        if rows is None:                  # print_cmd=True -> dry run, nothing collected
+            return []
+        return list(rows)
 
-    def monitor_frequencies(self, freqs_hz, *, span_hz=2_000_000, duration=None,
-                            on_update=None, lna=16, vga=20, amp=False):
+    def monitor_frequencies(self, freqs_hz: list[float], *,
+                            span_hz: float = 2_000_000,
+                            duration: float | None = None,
+                            on_update: Callable[..., Any] | None = None,
+                            lna: int = 16, vga: int = 20,
+                            amp: bool = False) -> Any:
         # Watch POWER over time at several frequencies, backed by hackrf_sweep's
         # fast internal hardware retuning. This is DELIBERATELY a different
         # method from scan_frequencies():
@@ -105,7 +123,7 @@ class SweepMixin:
         hi = max(freqs_hz) + span_hz
         t0 = _time.time()
 
-        def _nearest_power(rows_by_low, f):
+        def _nearest_power(rows_by_low: dict[int, Any], f: float) -> Any:
             # find the sweep segment whose [hz_low, hz_high) covers f, return
             # the mean dB of that segment's bins (a simple power proxy)
             for low in sorted(rows_by_low):
@@ -118,7 +136,9 @@ class SweepMixin:
         from .._stream_ctx import StreamCtx
         results = []
         stopped = False
-        with StreamCtx(self.sweep(lo, hi, lna=lna, vga=vga, amp=amp)) as gen:
+        _rows = self.sweep(lo, hi, lna=lna, vga=vga, amp=amp)
+        assert _rows is not None          # print_cmd not passed -> real generator
+        with StreamCtx(_rows) as gen:
             rows_by_low = {}
             last_time = None
             for row in gen:
@@ -145,10 +165,12 @@ class SweepMixin:
                     results.append(update)
         return None if on_update is not None else results
 
-    def sweep_to_file(self, f_min_hz, f_max_hz, out, *, binary=False,
-                      inverse_fft=False, bin_width=None, lna=16, vga=20,
-                      amp=False, one_shot=False, num_sweeps=None,
-                      print_cmd=False):
+    def sweep_to_file(self, f_min_hz: float, f_max_hz: float, out: str, *,
+                      binary: bool = False, inverse_fft: bool = False,
+                      bin_width: float | None = None, lna: int = 16,
+                      vga: int = 20, amp: bool = False, one_shot: bool = False,
+                      num_sweeps: int | None = None,
+                      print_cmd: bool = False) -> str | None:
         # Write sweep output straight to a file instead of yielding parsed
         # rows. This is the home for hackrf_sweep's binary-output flags, which
         # don't fit the text-CSV generator:
@@ -183,7 +205,7 @@ class SweepMixin:
         self._run(argv, mode="blocking", print_cmd=print_cmd)
         return None if print_cmd else out
 
-    def sweep_stream(self, f_min_hz, f_max_hz, **k):
+    def sweep_stream(self, f_min_hz: float, f_max_hz: float, **k: Any) -> Any:
         # Context manager around the sweep generator so the underlying
         # hackrf_sweep is ALWAYS reaped on exit -- including KeyboardInterrupt
         # out of a live consumer loop (e.g. a waterfall). Without this, a
@@ -193,10 +215,14 @@ class SweepMixin:
         #         for row in rows: ...
         from .._stream_ctx import StreamCtx
         gen = self.sweep(f_min_hz, f_max_hz, **k)
+        if gen is None:                   # print_cmd=True -> nothing to stream
+            raise HackRFValueError(
+                "sweep_stream() has no stream to yield with print_cmd=True; "
+                "call sweep(..., print_cmd=True) for a dry-run preview.")
         return StreamCtx(gen)
 
     @staticmethod
-    def parse_sweep_line(line):
+    def parse_sweep_line(line: str) -> dict[str, Any] | None:
         # Returns {date,time,hz_low,hz_high,bin_width,num_samples,db:[...]} or
         # None for blank/garbled lines.
         line = line.strip()

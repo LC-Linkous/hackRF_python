@@ -11,6 +11,15 @@ Work on the current development branch. Entries move to a versioned section on
 release.
 
 ### Added
+- Type annotations across the entire shipped package, and `mypy` promoted to a
+  blocking CI gate (`disallow_untyped_defs`). The package has always shipped a
+  `py.typed` marker, which tells downstream type-checkers the inline annotations
+  are real; previously only 1 of ~114 definitions was annotated, so that marker
+  was a false promise. It is now enforced.
+- `HostOps` protocol (`_host.py`) making the contract between `HackRF` and the
+  command mixins explicit and type-checkable. The mixins call ~27 methods on
+  `self` that live on the host class; that dependency was previously implicit in
+  a comment. Runtime composition and MRO are unchanged.
 - Continuous integration: GitHub Actions workflow running the test suite across
   Windows, Linux, and macOS on Python 3.11-3.13, plus a ruff + mypy lint job.
 - CLI test suite covering argument parsing, the mode state file, preset
@@ -42,6 +51,17 @@ release.
   the codebase made lint-clean so the CI lint job is meaningful.
 
 ### Fixed
+- The `atexit` backstop never reaped an orphaned `PersistentReceiver`.
+  `PersistentReceiver` registers itself in the live-handle registry, whose
+  shutdown hook calls `if h.is_alive(): h.stop()` -- but `is_alive()` did not
+  exist on the class, so the resulting `AttributeError` was swallowed by the
+  hook's bare `except Exception` and the receiver was silently left running.
+  Found by the typing pass; `is_alive()` added and pinned with a regression test.
+- Reading from a closed `PersistentReceiver` raised a bare
+  `TypeError: 'NoneType' object is not iterable` instead of a typed error; it now
+  raises `HackRFDeviceError` with an actionable message.
+- `sweep_stream(..., print_cmd=True)` would hand `StreamCtx` a `None` and crash;
+  it now raises `HackRFValueError` pointing at `sweep(..., print_cmd=True)`.
 - Unbounded memory growth on long-lived RX/TX handles: `_Process` drained child
   stdout/stderr into lists that were never trimmed, so an open-ended capture or
   repeat transmit retained every per-second stats line for the life of the

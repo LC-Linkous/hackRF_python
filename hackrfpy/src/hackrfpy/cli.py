@@ -18,7 +18,10 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
 import argparse
+from typing import Any, Sequence
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -39,7 +42,7 @@ from . import presets as P
 
 
 # ---- mode state file (mode persists across CLI invocations) ------------------
-def _print_detect(det):
+def _print_detect(det: dict[str, Any]) -> None:
     print("hackrfpy detect")
     print("-" * 40)
     if det["problem"] and not det["found"]:
@@ -67,13 +70,13 @@ def _print_detect(det):
         print(f"  note            : {det['problem']}")
 
 
-def _state_path():
+def _state_path() -> str:
     base = os.environ.get("XDG_CONFIG_HOME",
                           os.path.join(os.path.expanduser("~"), ".config"))
     return os.path.join(base, C.STATE_DIR_NAME, C.STATE_FILE_NAME)
 
 
-def read_mode():
+def read_mode() -> str:
     path = _state_path()
     try:
         with open(path) as f:
@@ -85,7 +88,7 @@ def read_mode():
     return C.DEFAULT_MODE
 
 
-def write_mode(mode):
+def write_mode(mode: str) -> None:
     path = _state_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -93,7 +96,8 @@ def write_mode(mode):
 
 
 # Subcommands whose only job is to relay to a device method with **flags.
-def _add_common_rf(p, freq_required=True):
+def _add_common_rf(p: argparse.ArgumentParser,
+                   freq_required: bool = True) -> None:
     p.add_argument("-f", "--frequency", type=parse_freq, required=freq_required,
                    help="center frequency (e.g. 433.92M, 1.09G, or Hz)")
     p.add_argument("-s", "--sample-rate", dest="sample_rate", type=parse_freq,
@@ -108,7 +112,7 @@ def _add_common_rf(p, freq_required=True):
 
 
 class HackRFCLI:
-    def __init__(self, a=None):
+    def __init__(self, a: Sequence[str] | None = None) -> None:
         main_parser = argparse.ArgumentParser(prog="hrf", description="hackrfpy")
         main_parser.add_argument("--version", action="version",
                                  version=f"%(prog)s {_VERSION}")
@@ -186,10 +190,10 @@ class HackRFCLI:
         self.args = main_parser.parse_args(a)
         self._parser = main_parser
 
-    def getArgs(self):
+    def getArgs(self) -> argparse.Namespace:
         return self.args
 
-    def _make_device(self, args):
+    def _make_device(self, args: argparse.Namespace) -> HackRF:
         h = HackRF(verbose=getattr(args, "verbose", False),
                    serial=getattr(args, "serial", None))
         h.allow_out_of_spec = getattr(args, "force", False)
@@ -197,7 +201,7 @@ class HackRFCLI:
         h.restore_mode(read_mode())
         return h
 
-    def main(self, args):
+    def main(self, args: argparse.Namespace) -> None:
         name = args.subparser_name
         if name is None:
             self._parser.print_help()
@@ -278,7 +282,7 @@ class HackRFCLI:
                         + [f"{d:.2f}" for d in row["db"]]))
 
 
-def main():
+def main() -> None:
     app = HackRFCLI()
     try:
         app.main(app.getArgs())

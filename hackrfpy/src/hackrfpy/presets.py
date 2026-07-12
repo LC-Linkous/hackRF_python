@@ -17,15 +17,14 @@
 #   Last Update: July 11, 2026
 ##--------------------------------------------------------------------\
 
-import os
+from __future__ import annotations
 
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None
+import os
+import tomllib      # stdlib on 3.11+, which is this package's minimum
+from typing import Any
 
 # Each preset: center or (f_min, f_max) for sweeps, plus a default sample rate.
-BUILTIN_PRESETS = {
+BUILTIN_PRESETS: dict[str, dict[str, Any]] = {
     "fm":       {"f_min": 88_000_000,   "f_max": 108_000_000, "sample_rate": 10_000_000,
                  "desc": "FM broadcast band"},
     "airband":  {"f_min": 118_000_000,  "f_max": 137_000_000, "sample_rate": 8_000_000,
@@ -43,17 +42,17 @@ BUILTIN_PRESETS = {
 }
 
 
-def _config_path():
+def _config_path() -> str:
     base = os.environ.get("XDG_CONFIG_HOME",
                           os.path.join(os.path.expanduser("~"), ".config"))
     return os.path.join(base, "hackrfpy", "presets.toml")
 
 
-def load_presets():
+def load_presets() -> dict[str, dict[str, Any]]:
     # Built-ins overlaid with the user's TOML (user wins on key collisions).
     presets = {k: dict(v) for k, v in BUILTIN_PRESETS.items()}
     path = _config_path()
-    if tomllib and os.path.isfile(path):
+    if os.path.isfile(path):
         with open(path, "rb") as f:
             user = tomllib.load(f)
         for name, cfg in user.get("presets", {}).items():
@@ -61,7 +60,7 @@ def load_presets():
     return presets
 
 
-def get_preset(name):
+def get_preset(name: str) -> dict[str, Any]:
     presets = load_presets()
     if name not in presets:
         from .exceptions import HackRFValueError

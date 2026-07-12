@@ -72,7 +72,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Mypy
-        # Non-blocking for now: flip `continue-on-error` to false once the
-        # type surface is clean and you want mypy to gate merges.
-        continue-on-error: true
-        run: uv run mypy src/hackrfpy
+        # Blocking. The package ships a py.typed marker, which promises
+        # downstream type-checkers that these annotations are real; this gate is
+        # what keeps that promise true.
+        run: uv run mypy

@@ -12,29 +12,34 @@
 #   Author(s): <you>
 ##--------------------------------------------------------------------\
 
+from __future__ import annotations
+
 import re
 import shutil
+from typing import Any
 
 from .. import constants as C
+from .._host import HostOps
 from ..exceptions import HackRFDeviceError, HackRFValueError
 
 
-class DeviceMixin:
+class DeviceMixin(HostOps):
     # ---- clock ----
-    def clock(self, *args, print_cmd=False):
+    def clock(self, *args: Any, print_cmd: bool = False) -> Any:
         argv = ["clock"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
     # ---- operacake antenna switch ----
-    def operacake(self, *args, print_cmd=False):
+    def operacake(self, *args: Any, print_cmd: bool = False) -> Any:
         argv = ["operacake"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
-    def operacake_list(self):
+    def operacake_list(self) -> Any:
         return self.operacake("-l")
 
     # ---- cpld jtag (CPLD firmware) ----
-    def cpldjtag(self, firmware, *, confirm=False, print_cmd=False):
+    def cpldjtag(self, firmware: str, *, confirm: bool = False,
+                 print_cmd: bool = False) -> Any:
         if not confirm and not print_cmd:
             raise HackRFValueError(
                 "cpldjtag flashes the CPLD and can brick the board. "
@@ -43,7 +48,8 @@ class DeviceMixin:
                          text=True, print_cmd=print_cmd)
 
     # ---- spiflash (firmware) ----
-    def spiflash_write(self, firmware, *, confirm=False, print_cmd=False):
+    def spiflash_write(self, firmware: str, *, confirm: bool = False,
+                       print_cmd: bool = False) -> Any:
         # Writing firmware. The single most dangerous operation in the library.
         if not confirm and not print_cmd:
             raise HackRFValueError(
@@ -53,18 +59,19 @@ class DeviceMixin:
         return self._run(["spiflash", "-w", firmware], mode="blocking",
                          text=True, print_cmd=print_cmd)
 
-    def spiflash_read(self, out, length=None, print_cmd=False):
-        argv = ["spiflash", "-r", out]
+    def spiflash_read(self, out: str, length: int | None = None,
+                      print_cmd: bool = False) -> Any:
+        argv: list[Any] = ["spiflash", "-r", out]
         if length is not None:
             argv += ["-l", int(length)]
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
-    def spiflash_reset(self, print_cmd=False):
+    def spiflash_reset(self, print_cmd: bool = False) -> Any:
         return self._run(["spiflash", "-R"], mode="blocking", text=True,
                          print_cmd=print_cmd)
 
     # ---- debug register access ----
-    def debug(self, *args, print_cmd=False):
+    def debug(self, *args: Any, print_cmd: bool = False) -> Any:
         argv = ["debug"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
@@ -72,11 +79,11 @@ class DeviceMixin:
     # preflight: environment / readiness check
     # (was 'doctor' -- kept as an alias below for the familiar CLI verb)
     # =================================================================
-    def preflight(self, capture_path="."):
+    def preflight(self, capture_path: str = ".") -> dict[str, Any]:
         # Checks tooling, board presence, free disk, and reports the active
         # mode. Returns a structured report; raises only on hard environment
         # failures the user must fix.
-        report = {"tools": {}, "boards": [], "mode": self.mode,
+        report: dict[str, Any] = {"tools": {}, "boards": [], "mode": self.mode,
                   "tool_version": None, "disk_free_bytes": None,
                   "features": {}, "problems": []}
 
@@ -133,10 +140,11 @@ class DeviceMixin:
 
     # doctor: familiar alias for preflight (brew/flutter-style verb). The CLI
     # still exposes `hrf doctor`; the honest method name is preflight().
-    def doctor(self, capture_path="."):
+    def doctor(self, capture_path: str = ".") -> dict[str, Any]:
         return self.preflight(capture_path=capture_path)
 
-    def features(self, tool_version=None, firmware_version=None):
+    def features(self, tool_version: str | None = None,
+                 firmware_version: str | None = None) -> dict[str, Any]:
         # Map version strings -> capability flags. The reliable year signal is
         # the FIRMWARE version (e.g. "2024.02.1"); the tools version is often a
         # git tag (e.g. "git-b1dbb47") with no parseable year. If nothing is
@@ -157,7 +165,7 @@ class DeviceMixin:
         # Prefer the firmware version's year; fall back to the tools version.
         # A "git-" build is a from-source build, which is current by
         # definition -- treat it as modern rather than merely "unknown".
-        def _year(v):
+        def _year(v: str | None) -> int | None:
             m = re.match(r"(\d{4})", v or "")
             return int(m.group(1)) if m else None
 
@@ -177,7 +185,7 @@ class DeviceMixin:
             "bias_tee": is_git or year is None or year >= 2018,  # -p
         }
 
-    def _print_preflight(self, r):
+    def _print_preflight(self, r: dict[str, Any]) -> None:
         print("hackrfpy preflight")
         print("-" * 40)
         for name, path in r["tools"].items():
