@@ -1,6 +1,6 @@
 [project]
 name = "hackrfpy"
-version = "1.0.0"
+version = "1.0.1"
 description = "A self-contained CLI + scriptable wrapper for the HackRF One, built on the hackrf-tools binaries (no libhackrf bindings required)."
 readme = "README.md"
 requires-python = ">=3.11"
