@@ -93,6 +93,11 @@ def _validate_capture(iq, expected_n):
         if power_db < -70:
             reasons.append(f"suspiciously quiet ({power_db:.1f} dBFS -- "
                            "dead antenna / wrong gain?)")
+        peak = float(mag.max())
+        if peak < 0.1:
+            reasons.append(f"low ADC utilization (peak {peak:.3f} < 0.1, "
+                           f"~{int(peak*128)} of 127 int8 codes -- raise "
+                           "LNA/VGA; see examples/calibrate.py)")
         clip = float(np.mean(mag > 0.99))
         if clip > 0.01:
             reasons.append(f"clipping ({clip*100:.1f}% of samples -- "
@@ -128,7 +133,7 @@ def collect_band(h, name, args, suspects):
           f"({args.seconds}s, {args.sample_rate/1e6:g} Msps) ==")
     try:
         h.capture(band["center"], args.sample_rate, num_samples=n,
-                  out=iq_path, sigmf=True)
+                  out=iq_path, sigmf=True, lna=args.lna, vga=args.vga)
         iq = load_iq(iq_path)
         size_mb = os.path.getsize(iq_path) / 1e6
         print(f"  wrote {os.path.basename(iq_path)} "
@@ -209,6 +214,11 @@ def main():
                    help="sample rate in sps (default 2e6, small + USB-friendly)")
     p.add_argument("--sweep-count", type=int, default=1,
                    help="sweeps per band dataset (default 1)")
+    p.add_argument("--lna", type=int, default=32,
+                   help="LNA gain dB (default 32; the old library default of "
+                        "16 produced ~3-bit captures on 2026-09-17)")
+    p.add_argument("--vga", type=int, default=28,
+                   help="VGA gain dB (default 28)")
     p.add_argument("--no-sweep", action="store_true",
                    help="IQ captures only, skip sweep datasets")
     args = p.parse_args()

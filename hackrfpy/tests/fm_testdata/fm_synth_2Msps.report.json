@@ -1,0 +1,19 @@
+{
+  "mode": "synthetic",
+  "station_hz": null,
+  "center_hz": null,
+  "offset_hz": 300000.0,
+  "sample_rate": 2000000.0,
+  "samples": 4000000,
+  "lna_gain_db": 0,
+  "vga_gain_db": 0,
+  "generator": "collect_fm_testdata.py deterministic v1",
+  "seed": 20260917,
+  "metrics": {
+    "mean_power_dbfs": -6.02,
+    "peak_amplitude": 0.5247,
+    "clip_fraction": 0.0,
+    "dc_offset": 1e-05,
+    "pilot_snr_db": 71.6
+  }
+}
