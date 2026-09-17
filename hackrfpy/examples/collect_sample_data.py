@@ -79,6 +79,32 @@ BANDS = {
 }
 
 
+def _validate_capture(iq, expected_n):
+    # Catch the failure modes of a bad collection run BEFORE the data goes
+    # into the sample library: short reads, a dead/disconnected front end
+    # (pure noise-floor silence), a stuck DC rail, and gain-induced clipping.
+    # Returns (ok, [reasons]).
+    reasons = []
+    if len(iq) < 0.9 * expected_n:
+        reasons.append(f"short read ({len(iq)}/{expected_n} samples)")
+    if len(iq):
+        mag = np.abs(iq)
+        power_db = 10 * np.log10(float(np.mean(mag ** 2)) + 1e-20)
+        if power_db < -70:
+            reasons.append(f"suspiciously quiet ({power_db:.1f} dBFS -- "
+                           "dead antenna / wrong gain?)")
+        clip = float(np.mean(mag > 0.99))
+        if clip > 0.01:
+            reasons.append(f"clipping ({clip*100:.1f}% of samples -- "
+                           "reduce gain)")
+        dc = float(abs(np.mean(iq)))
+        if dc > 0.1:
+            reasons.append(f"large DC offset ({dc:.3f})")
+    else:
+        reasons.append("empty capture")
+    return (not reasons), reasons
+
+
 def _signal_summary(iq):
     # A quick, honest description of what was captured: mean power and whether
     # there's evident signal vs noise floor. Not DSP -- just a sanity readout.
@@ -90,7 +116,7 @@ def _signal_summary(iq):
     return f"mean {db:.1f} dBFS, peak |amp| {peak:.3f}"
 
 
-def collect_band(h, name, args):
+def collect_band(h, name, args, suspects):
     band = BANDS[name]
     os.makedirs(OUT_DIR, exist_ok=True)
     n = int(args.sample_rate * args.seconds)
@@ -108,7 +134,15 @@ def collect_band(h, name, args):
         print(f"  wrote {os.path.basename(iq_path)} "
               f"({size_mb:.1f} MB, {len(iq)} samples) -- {_signal_summary(iq)}")
         print(f"  + {os.path.basename(iq_path).rsplit('.',1)[0]}.sigmf-meta")
+        ok, reasons = _validate_capture(iq, n)
+        if not ok:
+            print("  [!] SUSPECT capture -- " + "; ".join(reasons),
+                  file=sys.stderr)
+            print("  [!] kept on disk, but re-run this band before shipping "
+                  "it in the sample library", file=sys.stderr)
         results.append(iq_path)
+        if not ok:
+            suspects.append(iq_path)
     except HackRFError as e:
         print(f"  IQ capture failed: {e}", file=sys.stderr)
 
@@ -135,7 +169,7 @@ def collect_band(h, name, args):
     return results
 
 
-def write_readme(collected, args, det):
+def write_readme(collected, args, det, suspects=()):
     # A README for the sample library so the data is self-documenting.
     path = os.path.join(OUT_DIR, "README.md")
     with open(path, "w", newline="\n") as f:
@@ -156,7 +190,9 @@ def write_readme(collected, args, det):
                 "meta = read_sigmf_meta('fm_2Msps.iq')\n```\n\n")
         f.write("## Files\n\n")
         for p in collected:
-            f.write(f"- `{os.path.basename(p)}`\n")
+            flag = "  **(SUSPECT -- failed validation; re-collect)**" \
+                if p in suspects else ""
+            f.write(f"- `{os.path.basename(p)}`{flag}\n")
     print(f"\n  wrote {os.path.relpath(path, _HERE)}")
 
 
@@ -165,7 +201,8 @@ def main():
         description="Collect real sample datasets from a HackRF (READ-ONLY).")
     p.add_argument("--tools-dir", default=None)
     p.add_argument("--band", action="append", choices=list(BANDS),
-                   help="band(s) to collect; repeatable. Default: fm")
+                   help="band(s) to collect; repeatable. "
+                        "Default: fm, ism433, ism915")
     p.add_argument("--seconds", type=float, default=0.5,
                    help="capture duration per band (default 0.5s)")
     p.add_argument("--sample-rate", type=float, default=2e6,
@@ -175,7 +212,7 @@ def main():
     p.add_argument("--no-sweep", action="store_true",
                    help="IQ captures only, skip sweep datasets")
     args = p.parse_args()
-    bands = args.band or ["fm"]
+    bands = args.band or ["fm", "ism433", "ism915"]
 
     h = HackRF(tools_dir=args.tools_dir, verbose=False)
     print("== confirming a real board before collecting ==")
@@ -188,17 +225,22 @@ def main():
         print(f"  ! {w}")
 
     collected = []
+    suspects = []
     try:
         for name in bands:
-            collected += collect_band(h, name, args)
+            collected += collect_band(h, name, args, suspects)
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
     if collected:
-        write_readme(collected, args, det)
+        write_readme(collected, args, det, suspects)
         total = sum(os.path.getsize(p) for p in collected
                     if p.endswith(".iq")) / 1e6
         print(f"\n== done: {len(collected)} files, ~{total:.1f} MB of IQ "
               f"in {os.path.relpath(OUT_DIR, _HERE)} ==")
+    if suspects:
+        print(f"== {len(suspects)} capture(s) FAILED validation -- see "
+              "warnings above; re-run those bands ==", file=sys.stderr)
+        return 2
     return 0
 
 
