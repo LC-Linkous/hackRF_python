@@ -19,8 +19,8 @@
   "captures": [
     {
       "core:sample_start": 0,
-      "core:frequency": 98000000.0,
-      "core:datetime": "2026-09-17T17:01:38.912106+00:00"
+      "core:frequency": 915000000.0,
+      "core:datetime": "2026-09-17T17:01:40.558003+00:00"
     }
   ],
   "annotations": []
