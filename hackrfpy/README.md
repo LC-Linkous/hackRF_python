@@ -113,9 +113,10 @@ The [main GitHub repository](https://github.com/LC-Linkous/hackRF_python) provid
 
 **Acquisition**
 
-- `persistent_capture.py` — collect many segments at one frequency from a single long-lived process
+- `persistent_capture.py` — gapless back-to-back segments at one frequency from a single long-lived receive process (contrast with `capture(segment_secs=...)`, whose files have a short re-open gap between them)
 - `power_meter.py` — live dBFS power meter at one frequency via the callback API
 - `scan_then_capture.py` — sweep a band, find the strongest bin, then capture there
+- `channel_monitor.py` — live power meter on several frequencies at once via `monitor_frequencies` (one continuous sweep, no plotting extra needed)
 
 **Sweep and plotting**
 
@@ -130,7 +131,11 @@ The [main GitHub repository](https://github.com/LC-Linkous/hackRF_python) provid
 
 **Sample data**
 
-- `collect_sample_data.py` — collect real IQ + sweep datasets (read-only; never transmits)
+- `collect_sample_data.py` — collect real IQ + sweep datasets with per-capture validation (read-only; never transmits)
+
+**Transmit**
+
+- `tx_test_tone.py` — the one transmitting example: a bounded CW test tone behind the TX-mode gate, with `--print-cmd` dry-run
 
 > Most plotting examples require the optional plotting dependencies:
 > `pip install "hackrfpy[plotting]"`
