@@ -33,6 +33,13 @@ from .exceptions import HackRFDeviceError
 
 
 class PersistentReceiver:
+    """A long-lived receive stream: one child process, many reads.
+
+    Returned by HackRF.open_receiver(). Consecutive read(n) calls are
+    gapless (back-to-back samples from one continuous stream). Use as a
+    context manager, or call stop(), to guarantee the child is reaped;
+    the atexit backstop and OS dead-man cover abnormal exits.
+    """
     # A long-lived RX stream at one frequency. Created via
     # HackRF.open_receiver(...); use as a context manager so the child is
     # always reaped:
@@ -105,6 +112,7 @@ class PersistentReceiver:
         return False
 
     def close(self) -> None:
+        """Alias of stop()."""
         if self._closed:
             return
         self._closed = True
@@ -121,11 +129,13 @@ class PersistentReceiver:
             pass
 
     def stop(self) -> None:
+        """Interrupt the child cleanly and reap it; returns (out, err, rc)."""
         # alias so PersistentReceiver works with the _LIVE backstop, which
         # calls .stop() on whatever it holds
         self.close()
 
     def is_alive(self) -> bool:
+        """Return whether the receiving child process is still running."""
         # Required by the _LIVE atexit backstop, which does `if h.is_alive():
         # h.stop()`. This was MISSING: the resulting AttributeError was swallowed
         # by the backstop's bare `except Exception`, so an orphaned persistent
@@ -134,6 +144,11 @@ class PersistentReceiver:
 
     # ---- data access -------------------------------------------------------
     def read(self, n_samples: int) -> np.ndarray:
+        """Return up to n complex64 samples (fewer only if the stream ended).
+
+        Consecutive reads are gapless: back-to-back samples from one
+        continuous stream.
+        """
         # Return EXACTLY n_samples complex64 (or fewer if the stream ends).
         # Pulls and decodes raw bytes from the persistent stream until it has
         # enough; carries any partial trailing pair between calls. No new
@@ -154,6 +169,7 @@ class PersistentReceiver:
         return iq
 
     def blocks(self) -> Iterator[np.ndarray]:
+        """Yield decoded complex64 blocks as they arrive (generator)."""
         # Yield decoded complex64 blocks as they arrive (raw cadence), until
         # the stream ends or the caller stops iterating. Good for a continuous
         # consumer that doesn't need a fixed sample count per read.
@@ -171,6 +187,7 @@ class PersistentReceiver:
 
     def callback(self, on_block: Callable[[np.ndarray, int], Any], *,
                  max_samples: int | None = None) -> int:
+        """Invoke on_block(iq) per block until it returns False or the stream ends."""
         # Inverted loop over blocks(): call on_block(iq, total) per block;
         # stop on False, on max_samples, or stream end.
         for iq in self.blocks():

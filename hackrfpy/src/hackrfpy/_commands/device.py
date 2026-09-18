@@ -26,20 +26,24 @@ from ..exceptions import HackRFDeviceError, HackRFValueError
 class DeviceMixin(HostOps):
     # ---- clock ----
     def clock(self, *args: Any, print_cmd: bool = False) -> Any:
+        """Passthrough to hackrf_clock with the given arguments."""
         argv = ["clock"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
     # ---- operacake antenna switch ----
     def operacake(self, *args: Any, print_cmd: bool = False) -> Any:
+        """Passthrough to hackrf_operacake with the given arguments."""
         argv = ["operacake"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
     def operacake_list(self) -> Any:
+        """List attached Opera Cake boards (hackrf_operacake -l)."""
         return self.operacake("-l")
 
     # ---- cpld jtag (CPLD firmware) ----
     def cpldjtag(self, firmware: str, *, confirm: bool = False,
                  print_cmd: bool = False) -> Any:
+        """Program CPLD firmware (DANGEROUS; requires confirm=True)."""
         if not confirm and not print_cmd:
             raise HackRFValueError(
                 "cpldjtag flashes the CPLD and can brick the board. "
@@ -50,6 +54,11 @@ class DeviceMixin(HostOps):
     # ---- spiflash (firmware) ----
     def spiflash_write(self, firmware: str, *, confirm: bool = False,
                        print_cmd: bool = False) -> Any:
+        """Write SPI flash firmware (MOST DANGEROUS; requires confirm=True).
+
+        A bad image can brick the board until DFU recovery. print_cmd dry-runs
+        without the confirm gate.
+        """
         # Writing firmware. The single most dangerous operation in the library.
         if not confirm and not print_cmd:
             raise HackRFValueError(
@@ -61,17 +70,20 @@ class DeviceMixin(HostOps):
 
     def spiflash_read(self, out: str, length: int | None = None,
                       print_cmd: bool = False) -> Any:
+        """Read SPI flash contents to a file (safe, read-only)."""
         argv: list[Any] = ["spiflash", "-r", out]
         if length is not None:
             argv += ["-l", int(length)]
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
     def spiflash_reset(self, print_cmd: bool = False) -> Any:
+        """Reset the device (hackrf_spiflash -R)."""
         return self._run(["spiflash", "-R"], mode="blocking", text=True,
                          print_cmd=print_cmd)
 
     # ---- debug register access ----
     def debug(self, *args: Any, print_cmd: bool = False) -> Any:
+        """Passthrough to hackrf_debug with the given arguments."""
         argv = ["debug"] + list(args)
         return self._run(argv, mode="blocking", text=True, print_cmd=print_cmd)
 
@@ -80,6 +92,11 @@ class DeviceMixin(HostOps):
     # (was 'doctor' -- kept as an alias below for the familiar CLI verb)
     # =================================================================
     def preflight(self, capture_path: str = ".") -> dict[str, Any]:
+        """Check tools, board, free disk, and mode; return a structured report.
+
+        Raises only on hard environment failures; problems are listed in the
+        report so `doctor && capture` workflows can gate on them.
+        """
         # Checks tooling, board presence, free disk, and reports the active
         # mode. Returns a structured report; raises only on hard environment
         # failures the user must fix.
@@ -141,10 +158,16 @@ class DeviceMixin(HostOps):
     # doctor: familiar alias for preflight (brew/flutter-style verb). The CLI
     # still exposes `hrf doctor`; the honest method name is preflight().
     def doctor(self, capture_path: str = ".") -> dict[str, Any]:
+        """Alias of preflight()."""
         return self.preflight(capture_path=capture_path)
 
     def features(self, tool_version: str | None = None,
                  firmware_version: str | None = None) -> dict[str, Any]:
+        """Map tools/firmware version strings to capability flags.
+
+        The firmware version (e.g. '2024.02.1') is the reliable signal; tools
+        versions are often git hashes.
+        """
         # Map version strings -> capability flags. The reliable year signal is
         # the FIRMWARE version (e.g. "2024.02.1"); the tools version is often a
         # git tag (e.g. "git-b1dbb47") with no parseable year. If nothing is

@@ -29,6 +29,13 @@ class SweepMixin(HostOps):
               num_sweeps: int | None = None,
               print_cmd: bool = False
               ) -> Generator[dict[str, Any], None, None] | None:
+        """Stream a spectrum sweep as parsed dict rows (generator).
+
+        Rows carry date, time, hz_low, hz_high, bin_width, num_samples and db
+        (a list per bin). Segments arrive OUT of frequency order. Edges snap
+        outward to integer MHz (floor low, ceil high) so the swept range always
+        contains the requested band.
+        """
         # GENERATOR yielding parsed rows (dicts). Validate the band edges with
         # the same hard-range logic, snap gains. hackrf_sweep takes the range
         # in MHz as f_min:f_max.
@@ -96,6 +103,7 @@ class SweepMixin(HostOps):
 
     def sweep_collect(self, f_min_hz: float, f_max_hz: float,
                       num_sweeps: int = 1, **k: Any) -> list[dict[str, Any]]:
+        """Run num_sweeps full passes and return the parsed rows as a list."""
         # Convenience: collect a bounded number of sweeps into a list.
         k.pop("num_sweeps", None)
         rows = self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k)
@@ -109,6 +117,12 @@ class SweepMixin(HostOps):
                             on_update: Callable[..., Any] | None = None,
                             lna: int = 16, vga: int = 20,
                             amp: bool = False) -> Any:
+        """Track power over time at several frequencies via one sweep.
+
+        Yields (or passes to on_update) {freq: dB} per sweep pass; the reading
+        is the sweep bin covering the frequency (max of that bin +/-1), not a
+        segment average. Power only -- use scan_frequencies for IQ.
+        """
         # Watch POWER over time at several frequencies, backed by hackrf_sweep's
         # fast internal hardware retuning. This is DELIBERATELY a different
         # method from scan_frequencies():
@@ -183,6 +197,11 @@ class SweepMixin(HostOps):
                       vga: int = 20, amp: bool = False, one_shot: bool = False,
                       num_sweeps: int | None = None,
                       print_cmd: bool = False) -> str | None:
+        """Run hackrf_sweep writing to a file (CSV, or -B/-I binary).
+
+        binary=True (-B) and inverse_fft=True (-I) produce unparsed binary
+        passthrough; the library parses only the CSV text format.
+        """
         # Write sweep output straight to a file instead of yielding parsed
         # rows. This is the home for hackrf_sweep's binary-output flags, which
         # don't fit the text-CSV generator:
@@ -218,6 +237,7 @@ class SweepMixin(HostOps):
         return None if print_cmd else out
 
     def sweep_stream(self, f_min_hz: float, f_max_hz: float, **k: Any) -> Any:
+        """Return a StreamCtx over parsed sweep rows (reaped on context exit)."""
         # Context manager around the sweep generator so the underlying
         # hackrf_sweep is ALWAYS reaped on exit -- including KeyboardInterrupt
         # out of a live consumer loop (e.g. a waterfall). Without this, a
@@ -235,6 +255,7 @@ class SweepMixin(HostOps):
 
     @staticmethod
     def parse_sweep_line(line: str) -> dict[str, Any] | None:
+        """Parse one hackrf_sweep CSV line into a row dict, or None if invalid."""
         # Returns {date,time,hz_low,hz_high,bin_width,num_samples,db:[...]} or
         # None for blank/garbled lines.
         line = line.strip()

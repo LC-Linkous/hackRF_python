@@ -42,6 +42,14 @@ class CaptureMixin(HostOps):
                 baseband_bw: float | None = None, to_stdout: bool = False,
                 sigmf: bool = True, segment_secs: float | None = None,
                 print_cmd: bool = False) -> Any:
+        """Receive IQ at freq/sample_rate into a file (with SigMF sidecar).
+
+        Bound with num_samples or duration, or neither for an open-ended handle
+        (call .stop() on the returned process handle). segment_secs rolls output
+        across numbered files (whole files, short re-open gap between them; use
+        open_receiver for gapless). to_stdout=True streams decoded blocks
+        instead of writing a file.
+        """
         self.require_mode(C.MODE_RX)
         freq, sample_rate, lna, vga = self.validate_rx(freq, sample_rate, lna, vga)
         bw = self._auto_baseband(sample_rate, baseband_bw)
@@ -110,20 +118,29 @@ class CaptureMixin(HostOps):
 
     # ---- aliases ----
     def rx(self, *a: Any, **k: Any) -> Any:
+        """Alias of capture()."""
         return self.capture(*a, **k)
 
     def capture_samples(self, freq: float, sample_rate: float,
                         num_samples: int, **k: Any) -> Any:
+        """Alias of capture() with a required num_samples bound."""
         return self.capture(freq, sample_rate, num_samples=num_samples, **k)
 
     def capture_seconds(self, freq: float, sample_rate: float,
                         duration: float, **k: Any) -> Any:
+        """Alias of capture() with a required duration bound."""
         return self.capture(freq, sample_rate, duration=duration, **k)
 
     def scan_frequencies(self, freqs: list[float], sample_rate: float,
                          num_samples: int, *,
                          on_capture: Callable[..., Any] | None = None,
                          **k: Any) -> dict[float, np.ndarray] | None:
+        """Capture num_samples of IQ at each frequency in turn.
+
+        Returns {freq: complex64 ndarray}, or None when on_capture consumes
+        blocks instead. Each visit re-opens the device (short gap between
+        frequencies).
+        """
         # Sequentially capture a fixed sample count at each frequency in
         # `freqs`, retuning between them. This does NOT close the gapless-
         # retune gap (each retune is a fresh hackrf_transfer with a short
@@ -148,6 +165,11 @@ class CaptureMixin(HostOps):
     # ---- in-memory + context-managed entry points ----
     def capture_array(self, freq: float, sample_rate: float, num_samples: int,
                       *, return_params: bool = False, **k: Any) -> Any:
+        """Return exactly num_samples complex64 samples in RAM, no file.
+
+        The scripting entry point. return_params=True also returns the
+        validated parameters actually used.
+        """
         # Scripting entry point: return EXACTLY num_samples complex64 samples
         # in RAM, no file. Built on the stdout-stream path so it shares the
         # odd-byte carry + clean-reap logic. The stream is closed as soon as
@@ -184,6 +206,12 @@ class CaptureMixin(HostOps):
                       vga: int = 20, amp: bool = False,
                       baseband_bw: float | None = None,
                       read_samples: int = 131072) -> PersistentReceiver:
+        """Open a long-lived receive stream; returns a PersistentReceiver.
+
+        One hackrf_transfer process serves many .read(n) calls: consecutive
+        reads are gapless (contrast capture(segment_secs=...)). Use as a context
+        manager to guarantee the child is reaped.
+        """
         # Open a PERSISTENT fixed-frequency receiver: one long-lived
         # hackrf_transfer you drain in segments over time, so you don't pay the
         # ~1-2 s process spin-up per capture. Use as a context manager:
@@ -204,6 +232,11 @@ class CaptureMixin(HostOps):
 
     def capture_stream(self, freq: float, sample_rate: float,
                        **k: Any) -> StreamCtx:
+        """Context manager yielding decoded complex64 blocks from a live stream.
+
+        The receiving hackrf_transfer is always reaped on block exit, even on
+        exception.
+        """
         # Context manager wrapping the live stdout stream so the receiving
         # hackrf_transfer is ALWAYS reaped on exit, even on exception:
         #     with h.capture_stream(433.92e6, 8e6) as blocks:
@@ -217,6 +250,11 @@ class CaptureMixin(HostOps):
                          on_block: Callable[..., Any], *,
                          max_samples: int | None = None,
                          max_blocks: int | None = None, **k: Any) -> int:
+        """Invoke on_block(iq) per decoded block until a bound or False return.
+
+        Bounds: max_samples, max_blocks, or the callback returning False.
+        Returns the number of samples delivered.
+        """
         # Binder-style ergonomics over the subprocess stream: instead of the
         # caller writing the receive loop, register a callback that fires with
         # each decoded complex64 block as it arrives. This is the usability

@@ -335,6 +335,22 @@ class _Process:
 
 
 class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
+    """Python controller for a HackRF One, driving the hackrf-tools binaries.
+
+    The constructor touches no hardware; use from_device() for a fail-fast
+    probed handle. Receive works immediately; transmitting requires the
+    deliberate set_mode('tx') arming step. NOT thread-safe: one instance
+    per thread (see the class comment below and the README).
+    """
+    # THREAD SAFETY: a HackRF instance is NOT safe to share across threads.
+    # Methods mutate per-instance state without locks -- last_params readback,
+    # the persisted operating-mode state, verbose/logging wiring -- and the
+    # process handles it returns own per-child drain threads whose lists are
+    # appended from those threads but read from the caller's. One instance
+    # per thread (they are cheap: the constructor touches nothing), or confine
+    # all hackrfpy calls to a single worker thread. This limitation predates
+    # 1.0 and is recorded here rather than "fixed" because the right fix
+    # (locking) would serialize the interesting operations anyway.
     def __init__(self, tools_dir: str | None = None, verbose: bool = False,
                  serial: str | None = None) -> None:
         # ---- feedback ----
@@ -388,6 +404,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Feedback
     # =================================================================
     def set_verbose(self, verbose: bool = True) -> None:
+        """Enable or disable verbose progress output (INFO-level logging)."""
         self.verboseEnabled = verbose
         if verbose:
             # Make INFO actually visible in a plain script (see
@@ -397,15 +414,21 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 log.setLevel(logging.INFO)
 
     def get_verbose(self) -> bool:
+        """Return whether verbose progress output is enabled."""
         return self.verboseEnabled
 
     def print_message(self, msg: str) -> None:
+        """Emit a progress message (INFO, stderr) if verbose is enabled."""
         # Progress / status chatter. INFO, and gated on verbose so the level and
         # the flag agree. Goes to stderr (never stdout) -- see the module note.
         if self.verboseEnabled:
             log.info(msg)
 
     def warn(self, msg: str) -> None:
+        """Emit a warning (WARNING, stderr) regardless of the verbose flag.
+
+        Used for safety and degraded-results notices that must never be silent.
+        """
         # Safety / correctness warnings the user must see REGARDLESS of verbose.
         # (A degraded-results or out-of-spec notice that only prints in verbose
         # mode is, in practice, a silent warning.) WARNING level, so it survives
@@ -425,9 +448,16 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         self.set_mode(value)
 
     def get_mode(self) -> str:
+        """Return the current operating mode: "rx" or "tx"."""
         return self._mode
 
     def set_mode(self, value: str) -> str:
+        """Switch operating mode ("rx" or "tx") and persist it.
+
+        Switching to TX prints the one-time safety banner. Transmit methods
+        refuse unless the instance is in TX mode; this switch is the deliberate
+        arming step.
+        """
         value = str(value).lower()
         if value not in C.MODES:
             raise HackRFValueError(
@@ -440,6 +470,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return self._mode
 
     def restore_mode(self, value: str) -> str:
+        """Rehydrate a previously persisted mode without the switch ceremony.
+
+        No banner, no chatter: for the CLI restoring state between invocations
+        (the banner already fired at the original mode switch).
+        """
         # Rehydrate previously-persisted mode WITHOUT the switch ceremony
         # (no banner, no chatter). For the CLI restoring state between
         # invocations; the banner already fired at the original `mode tx`.
@@ -451,6 +486,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return self._mode
 
     def require_mode(self, needed: str) -> None:
+        """Raise HackRFModeError unless the instance is in the given mode."""
         if self._mode != needed:
             raise HackRFModeError(
                 f"operation requires '{needed}' mode but device is in "
@@ -535,6 +571,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def validate_rx(self, freq: float, sample_rate: float, lna: int,
                     vga: int) -> tuple[float, float, int, int]:
+        """Validate and snap receive parameters; return the values actually used.
+
+        Hard-range checks frequency and sample rate, snaps LNA/VGA to real
+        device gain steps. Returns (freq, sample_rate, lna, vga).
+        """
         freq = self._check_hard_range("frequency", freq,
                                       C.FREQ_MIN_HZ, C.FREQ_MAX_HZ)
         sample_rate = self._check_hard_range("sample_rate", sample_rate,
@@ -545,6 +586,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def validate_tx(self, freq: float, sample_rate: float, txvga: int,
                     amp: bool) -> tuple[float, float, int, bool]:
+        """Validate and snap transmit parameters; return the values actually used.
+
+        TX gain is capped by constants.TX_VGA_CEILING_DB. The only mode gate is
+        require_mode('tx'); frequency uses the full device range.
+        """
         # NOTE: TX frequency uses the full device range and is never policed by
         # --force; the only gate is being in TX mode. The gain ceiling guards
         # against an order-of-magnitude fat-finger.
@@ -568,6 +614,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Binary resolution
     # =================================================================
     def resolve(self, key: str) -> str:
+        """Return the full path of a hackrf tool by TOOLS key (e.g. 'transfer').
+
+        Raises HackRFDeviceError with an actionable message if the tool is not
+        found in tools_dir, the configured directory, or PATH.
+        """
         # key is a TOOLS key ("transfer", "info", ...). Returns the full path
         # or raises HackRFDeviceError with an actionable message.
         name = C.TOOLS[key]
@@ -599,6 +650,12 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     @classmethod
     def from_device(cls, *, tools_dir: str | None = None, verbose: bool = False,
                     serial: str | None = None) -> HackRF:
+        """Build a HackRF and immediately probe the attached board (fail fast).
+
+        Unlike the bare constructor (which touches nothing), this runs
+        hackrf_info: it raises HackRFDeviceError if tools are missing or no board
+        is present, and warns if the firmware looks stale.
+        """
         # Build a HackRF and immediately probe the attached board so callers
         # get a device whose reported firmware is known up front. Unlike the
         # bare constructor (which touches nothing), this RUNS hackrf_info, so
@@ -799,6 +856,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Shared helpers used by mixins
     # =================================================================
     def decode_iq(self, raw: bytes) -> np.ndarray:
+        """Decode HackRF-native interleaved int8 I/Q bytes to complex64.
+
+        Values are normalized to roughly [-1, 1); an odd trailing byte
+        (truncated final pair) is dropped.
+        """
         # HackRF native format -> complex64. Interleaved int8 I,Q,I,Q...
         # Guard against an odd trailing byte (truncated final pair).
         #
@@ -827,6 +889,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     @staticmethod
     def power_dbfs(iq: np.ndarray) -> float:
+        """Mean power of a complex64 block in dBFS (0 dBFS = |amplitude| 1.0)."""
         # Mean power of a complex64 block in dBFS (dB relative to full scale).
         # 0 dBFS == |amplitude| 1.0 (ADC full scale). Always <= 0 for real
         # captures. This is the raw, UNCALIBRATED reading.
@@ -838,6 +901,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     @staticmethod
     def gain_db(lna: int = 0, vga: int = 0, amp: bool = False) -> float:
+        """Total configured receive gain chain in dB (LNA + VGA + optional amp)."""
         # Total RX gain through the chain in dB: LNA (IF) + VGA (baseband) +
         # the fixed ~14 dB front-end amp if enabled. This is the quantity that
         # makes a raw dBFS reading ambiguous -- the SAME signal reads ~36 dB
@@ -850,6 +914,12 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                           freq_hz: float | None = None,
                           freq_correction: Callable[[float], float] | None = None
                           ) -> float:
+        """Gain-normalized power: dBFS minus the configured gain chain.
+
+        Readings are consistent across gain settings but RELATIVE, not absolute
+        dBm, unless offset_db from a known reference is supplied
+        (see examples/calibrate.py).
+        """
         # Gain-normalized power: subtract the gain chain so readings taken at
         # DIFFERENT gain settings are directly comparable. This is the Level 1
         # relative calibration -- still not absolute dBm, but consistent.
@@ -885,6 +955,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                          num_samples: int | None = None,
                          duration: float | None = None,
                          path: str = ".") -> dict[str, Any]:
+        """Estimate bytes, duration, and disk fit for a planned capture.
+
+        Returns a dict including sizes and free-disk headroom; use before long
+        captures to avoid filling the drive mid-recording.
+        """
         # Bytes/sec = sample_rate * 2 (int8 I + int8 Q). Returns a dict and
         # raises HackRFEnvironmentError if it would blow past free disk.
         bps = sample_rate * C.BYTES_PER_SAMPLE

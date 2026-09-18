@@ -31,6 +31,13 @@ class TransmitMixin(HostOps):
                  num_samples: int | None = None, duration: float | None = None,
                  max_duration: float | None = None,
                  print_cmd: bool = False) -> Any:
+        """Transmit an int8 interleaved I/Q file (requires TX mode).
+
+        Refuses unless set_mode('tx') was called. Bound with num_samples,
+        duration, or repeat (optionally capped by max_duration). Duration bounds
+        are enforced parent-side (timed interrupt): a --print-cmd argv copied and
+        run by hand carries NO time bound.
+        """
         # source: path to an int8 I/Q file to transmit.
         # max_duration: hard ceiling (seconds) enforced even for open-ended
         #   repeat transmits. A transmitter that runs until .stop() is a
@@ -80,10 +87,12 @@ class TransmitMixin(HostOps):
 
     # ---- aliases ----
     def tx(self, *a: Any, **k: Any) -> Any:
+        """Alias of transmit()."""
         return self.transmit(*a, **k)
 
     def transmit_file(self, freq: float, sample_rate: float, source: str,
                       **k: Any) -> Any:
+        """Alias of transmit()."""
         return self.transmit(freq, sample_rate, source, **k)
 
     def transmit_cw(self, freq: float, sample_rate: float, *,
@@ -92,6 +101,11 @@ class TransmitMixin(HostOps):
                     duration: float | None = None,
                     max_duration: float | None = None,
                     print_cmd: bool = False) -> Any:
+        """Transmit a constant-wave test tone (requires TX mode).
+
+        amplitude is the DAC level 0-127. Same duration semantics as
+        transmit(): the time bound is parent-side, not in the printed argv.
+        """
         # Constant-wave / signal-source test mode: hackrf_transfer -c <amp>.
         # Transmits a fixed signal at `amplitude` (0-127) instead of a file.
         # TX-gated like any transmit. Useful for antenna/range testing. Open-
