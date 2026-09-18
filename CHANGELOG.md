@@ -100,6 +100,38 @@ release.
   SIGKILL of an intermediate parent on POSIX -- the child dies AND its
   interrupt handler ran -- plus the opt-out gate; the Windows Job Object
   leg proves on the next CI push. (plan:#4, Phase 3b)
+- SigMF spec compliance is now tested, not trusted (plan:#8): the official
+  `sigmf` package joined the dev dependency group, and the sidecar writer's
+  output is validated with it -- including that the `hackrf` extension is
+  DECLARED, not just used (a strict-validator rejection that regressed once
+  pre-1.0). GNU Radio / IQEngine interop is a tested property.
+- Docstrings across the entire public API (plan:#1): every public method on
+  `HackRF` and `PersistentReceiver`, both classes, and the module-level
+  functions -- 60 docstrings where `help()` previously returned nothing.
+  The documentation used to live only in `#` comments, invisible to
+  `help()`, IDE tooltips, and doc generators; the comments (which carry the
+  rationale) remain, and the docstrings carry the contract. Includes the
+  print-cmd caveat on `transmit`/`transmit_cw`: duration bounds are
+  enforced parent-side, so a copied `--print-cmd` argv carries NO time
+  bound. `tests/test_docstrings.py` gates the whole surface so it cannot
+  drift back to undocumented.
+- CLI catch-up with the library (plan:#5), each command with tests:
+  `hrf tx --cw` (a bounded CW test tone; requires `-d/--duration` because an
+  unbounded carrier is exactly the orphan-transmitter risk the library
+  exists to prevent; `--cw-amplitude` defaults below full scale),
+  `hrf monitor` (sweep-backed multi-frequency power to stdout),
+  `hrf scan` (per-frequency capture power), and `hrf sweep -o FILE` with
+  `-B` / `-I` binary passthrough (which refuse the CSV stdout path, since
+  that output is unparsed).
+- Thread-safety documented (rescued by the roadmap-comment cleanup; it was
+  recorded nowhere else): a `HackRF` instance is not safe to share across
+  threads -- per-instance mutable state (`last_params`, persisted mode,
+  logging wiring) and per-child drain threads. One instance per thread;
+  instances are cheap. In the README and on the class.
+- Coverage policy recorded in CONTRIBUTING (plan:#11): CI gates at
+  `--cov-fail-under=82`, deliberately under the measured 85% because that
+  figure counts Windows-only and hardware-only code as missed on Linux legs;
+  to be revisited upward after the docstring pass.
 - `hackrfpy.__version__`, resolved from installed package metadata
   (`importlib.metadata`), with a `0.0.0+unknown` fallback for uninstalled
   checkouts. (plan:#7)
