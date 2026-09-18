@@ -75,3 +75,15 @@ def test_user_toml_overrides_builtin(tmp_path, monkeypatch):
     pre = P.load_presets()
     assert pre["ads-b"]["center"] == 1_100_000_000   # user wins
     assert pre["ads-b"]["desc"] == "overridden"
+
+
+# ---- package version attribute ---------------------------------------------
+def test_dunder_version_present():
+    import hackrfpy
+    v = hackrfpy.__version__
+    assert isinstance(v, str) and v
+    try:
+        from importlib.metadata import version
+        assert v == version("hackrfpy")
+    except Exception:
+        assert v.startswith("0.0.0")          # uninstalled checkout fallback
