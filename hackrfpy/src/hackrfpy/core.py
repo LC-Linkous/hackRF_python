@@ -77,8 +77,10 @@ def _ensure_console_logging() -> None:
 # ---- platform interrupt plumbing -------------------------------------------
 # hackrf_* tools flush + close cleanly on SIGINT. On Windows SIGINT can't be
 # delivered to a child; the equivalent is CTRL_BREAK_EVENT, which requires
-# the child to be in its own process group. Best-effort: exercised on POSIX,
-# untested on Windows.
+# the child to be in its own process group. Both paths are exercised by
+# tests/test_interrupt_clean.py, which asserts the interrupt signal itself
+# arrives (not the terminate() escalation) and that a handler's final flush
+# survives into the drained output -- the no-truncated-capture contract.
 if sys.platform == "win32":  # pragma: no cover
     _CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP
     _INTERRUPT_SIGNAL = signal.CTRL_BREAK_EVENT
@@ -100,13 +102,107 @@ def _interrupt(proc: subprocess.Popen[Any]) -> None:
 # It does NOT survive `kill -9` / power loss (no handler runs); that needs an
 # OS dead-man (Linux PR_SET_PDEATHSIG / Windows Job Object) which is platform-
 # split work deferred to a later pass.
-# TODO(os-deadman): Linux prctl(PR_SET_PDEATHSIG); Windows Job Object with
-# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Survives hard-kill of the parent.
+# ---- OS dead-man ------------------------------------------------------------
+# The atexit backstop never runs on SIGKILL / TerminateProcess, so a hard-
+# killed parent could orphan a live transmitter. The dead-man asks the OS
+# itself to end the child when the parent dies, surviving any kind of parent
+# death:
+#   Linux   : the child sets PR_SET_PDEATHSIG to SIGINT in preexec, so the
+#             kernel delivers the CLEAN interrupt (same flush path as stop())
+#             the moment the parent dies. A getppid() check closes the fork-
+#             window race where the parent died before prctl ran.
+#   Windows : the child is assigned to a Job Object with KILL_ON_JOB_CLOSE.
+#             The parent's death closes its handles; the OS then terminates
+#             the whole job -- including the .bat -> python launcher tree.
+#             The job handle lives on the _Process; dropping every reference
+#             to a running protected handle therefore lets GC close the job
+#             and reap the child, which is the dead-man philosophy applied
+#             to a leaked handle.
+#   macOS   : no equivalent primitive; the atexit backstop remains the only
+#             net there.
+# Scope: handle-mode spawns, gated exactly like the atexit registry below
+# (TX always, RX unless backstop_rx=False). Exercised by
+# tests/test_deadman.py, including a real parent hard-kill.
 #
 # TX handles are ALWAYS registered (an orphaned transmitter is a regulatory /
 # interference problem). RX handles are registered by default but can opt out
 # (an orphaned receiver only wastes disk, and fire-and-forget is occasionally
 # wanted).
+if sys.platform == "win32":
+    def _deadman_preexec() -> Any:
+        return None                      # Windows path uses the Job Object
+
+    def _deadman_attach(proc: subprocess.Popen[Any]) -> Any:
+        import ctypes
+        from ctypes import wintypes
+
+        class _BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in (
+                "ReadOperationCount", "WriteOperationCount",
+                "OtherOperationCount", "ReadTransferCount",
+                "WriteTransferCount", "OtherTransferCount")]
+
+        class _ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _BasicLimits),
+                        ("IoInfo", _IoCounters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        _KILL_ON_JOB_CLOSE = 0x2000
+        _EXTENDED_LIMIT_CLASS = 9
+        try:
+            k32 = ctypes.windll.kernel32
+            job = k32.CreateJobObjectW(None, None)
+            if not job:
+                return None
+            info = _ExtendedLimits()
+            info.BasicLimitInformation.LimitFlags = _KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(
+                    job, _EXTENDED_LIMIT_CLASS, ctypes.byref(info),
+                    ctypes.sizeof(info)):
+                k32.CloseHandle(job)
+                return None
+            if not k32.AssignProcessToJobObject(
+                    job, wintypes.HANDLE(int(proc._handle))):  # type: ignore[attr-defined]
+                k32.CloseHandle(job)
+                return None
+            return job
+        except OSError:
+            return None                  # best-effort: never block a spawn
+else:
+    def _deadman_preexec() -> Any:
+        if not sys.platform.startswith("linux"):
+            return None                  # macOS: no pdeathsig primitive
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None, use_errno=True)
+        except OSError:
+            return None
+        _PR_SET_PDEATHSIG = 1
+
+        def _preexec() -> None:
+            libc.prctl(_PR_SET_PDEATHSIG, signal.SIGINT, 0, 0, 0)
+            if os.getppid() == 1:        # parent died in the fork window
+                os.kill(os.getpid(), signal.SIGINT)
+        return _preexec
+
+    def _deadman_attach(proc: subprocess.Popen[Any]) -> Any:
+        return None                      # POSIX path is the preexec
+
+
 class _Stoppable(Protocol):
     # What the atexit backstop actually needs. _Process and PersistentReceiver
     # both satisfy it; a Protocol keeps _LIVE honest about holding both without
@@ -153,6 +249,7 @@ class _Process:
                  kind: str = "rx") -> None:
         self._proc = proc
         self._owner = owner
+        self._job: Any = None            # Windows Job Object (OS dead-man)
         self._kind = kind          # "rx" | "tx" -- for atexit messaging
         self._stopped = False
         self._out_chunks: list[bytes] = []
@@ -170,7 +267,13 @@ class _Process:
     @staticmethod
     def _drain(stream: Any, sink: list[bytes]) -> None:
         try:
-            for chunk in iter(lambda: stream.read(65536), b""):
+            # read1(): return as soon as ANY bytes are available (at most one
+            # raw read), b"" only at EOF. Plain read(65536) on a BufferedReader
+            # BLOCKS until 64 KB accumulate, so a child's small writes (e.g.
+            # hackrf_transfer's ~60-byte-per-second stats lines) were invisible
+            # to the parent until process exit -- output was only "live" if the
+            # child flooded past the buffer size.
+            for chunk in iter(lambda: stream.read1(65536), b""):
                 sink.append(chunk)
                 # Bound retained output: drop oldest chunks once over the cap,
                 # always keeping at least the latest one. Prevents unbounded
@@ -191,7 +294,18 @@ class _Process:
             try:
                 self._proc.wait(timeout=grace)
             except subprocess.TimeoutExpired:
+                # Escalation ladder, each rung bounded and REAPED: a child
+                # that ignores the interrupt gets terminate(); one that
+                # survives that gets kill(). stop() previously fired
+                # terminate() and returned without waiting, so a hardened
+                # child could outlive stop() and result() reported
+                # returncode None.
                 self._proc.terminate()
+                try:
+                    self._proc.wait(timeout=grace)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                    self._proc.wait()
         self._stopped = True
         _LIVE.discard(self)         # no longer needs the atexit backstop
         return self.result()
@@ -550,12 +664,18 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         if mode == "stream":
             return self._stream(resolved, text=text, read_samples=read_samples)
         if mode == "handle":
+            # Tier C (OS dead-man): same gate as the atexit registry below.
+            protected = kind == "tx" or self.backstop_rx
+            preexec = _deadman_preexec() if protected else None
             proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
-                                    creationflags=_CREATION_FLAGS)
+                                    creationflags=_CREATION_FLAGS,
+                                    preexec_fn=preexec)
             handle = _Process(proc, self, kind=kind)
+            if protected:
+                handle._job = _deadman_attach(proc)
             # Tier B: TX always backstopped; RX backstopped unless opted out.
-            if kind == "tx" or self.backstop_rx:
+            if protected:
                 _register_live(handle)
             return handle
 
