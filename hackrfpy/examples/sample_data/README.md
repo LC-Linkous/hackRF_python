@@ -2,7 +2,7 @@
 
 Real recordings from a HackRF One, for trying the library and downstream processing without owning a board.
 
-- collected: 2026-09-17T13:01:40
+- collected: 2026-09-17T19:32:50
 - device firmware: 2024.02.1 (API:1.08)
 - tools: git-b1dbb47
 - sample rate: 2 Msps, 0.5s per IQ capture
@@ -19,7 +19,7 @@ meta = read_sigmf_meta('fm_2Msps.iq')
 
 - `fm_2Msps.iq`
 - `fm_sweep.csv`
-- `ism433_2Msps.iq`
+- `ism433_2Msps.iq`  *(noise-floor reference)*
 - `ism433_sweep.csv`
-- `ism915_2Msps.iq`
+- `ism915_2Msps.iq`  *(burst captured)*
 - `ism915_sweep.csv`

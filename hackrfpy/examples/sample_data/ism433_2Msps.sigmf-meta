@@ -5,8 +5,8 @@
     "core:hw": "HackRF One",
     "core:version": "1.0.0",
     "core:recorder": "hackrfpy",
-    "hackrf:lna_gain_db": 16,
-    "hackrf:vga_gain_db": 20,
+    "hackrf:lna_gain_db": 32,
+    "hackrf:vga_gain_db": 28,
     "hackrf:amp_enabled": false,
     "core:extensions": [
       {
@@ -20,7 +20,7 @@
     {
       "core:sample_start": 0,
       "core:frequency": 433920000.0,
-      "core:datetime": "2026-09-17T17:01:39.728042+00:00"
+      "core:datetime": "2026-09-17T23:32:49.808627+00:00"
     }
   ],
   "annotations": []
