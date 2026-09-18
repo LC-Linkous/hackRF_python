@@ -102,6 +102,14 @@ h.transmit(433.92e6, 8e6, "signal.iq", txvga=20)
 
 **Transmitting is regulated.** You are responsible for operating within the law and within your equipment's limits.
 
+## Thread safety
+
+A `HackRF` instance is **not** safe to share across threads: methods mutate
+per-instance state (`last_params`, the persisted operating mode, logging
+wiring) without locks. Instances are cheap -- the constructor touches no
+hardware -- so create one per thread, or confine all hackrfpy calls to a
+single worker thread.
+
 ## Examples
 
 The [main GitHub repository](https://github.com/LC-Linkous/hackRF_python) provides runnable examples, grouped by what they demonstrate.
