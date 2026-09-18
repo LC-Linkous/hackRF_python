@@ -13,7 +13,7 @@
 #
 #
 #   Author(s): Lauren Linkous
-#   Last Update: July 11, 2026
+#   Last Update: September 17, 2026
 ##--------------------------------------------------------------------\
 import numpy as np
 import matplotlib.pyplot as plt
