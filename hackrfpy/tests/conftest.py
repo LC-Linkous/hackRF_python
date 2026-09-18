@@ -69,20 +69,41 @@ STDERR_FLOOD = {stderr_flood!r}
 IDLE = {idle!r}
 EXIT_CODE = {exit_code!r}
 EMIT_BYTES = {emit_bytes!r}
+TAIL_ON_INTERRUPT = {tail_on_interrupt!r}
+IGNORE_INTERRUPT = {ignore_interrupt!r}
 
 def _on_signal(signum, frame):
+    # record WHICH signal arrived, so tests can distinguish the clean
+    # interrupt (SIGINT / SIGBREAK from CTRL_BREAK_EVENT) from the
+    # terminate() escalation -- "the child died" is not "the child was
+    # interrupted cleanly"
     if MARKER:
         try:
-            open(MARKER, "w").close()
-        except OSError:
-            pass
+            with open(MARKER, "w") as fh:
+                fh.write(signal.Signals(signum).name)
+        except (OSError, ValueError):
+            try:
+                open(MARKER, "w").close()
+            except OSError:
+                pass
+    if TAIL_ON_INTERRUPT:
+        # the hackrf_transfer contract: flush buffered output BEFORE dying,
+        # so the capture file is never truncated mid-sample-pair
+        sys.stdout.write(TAIL_ON_INTERRUPT + "\\n")
+        sys.stdout.flush()
     sys.exit(0)
 
-signal.signal(signal.SIGINT, _on_signal)
-if hasattr(signal, "SIGBREAK"):
-    signal.signal(signal.SIGBREAK, _on_signal)
-if hasattr(signal, "SIGTERM"):
-    signal.signal(signal.SIGTERM, _on_signal)
+if IGNORE_INTERRUPT:
+    # deaf child: exercises the stop() grace-timeout -> terminate() path
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+else:
+    signal.signal(signal.SIGINT, _on_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _on_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _on_signal)
 
 for line in STDERR_LINES:
     sys.stderr.write(line + "\\n")
@@ -101,8 +122,9 @@ for line in STDOUT_LINES:
 sys.stdout.flush()
 
 if IDLE:
-    while True:
-        if STDERR_LINES:
+    _idle_until = time.monotonic() + 30.0    # safety ceiling: never leak a
+    while time.monotonic() < _idle_until:    # stub child on CI, even one
+        if STDERR_LINES:                     # that ignores interrupts
             sys.stderr.write(STDERR_LINES[-1] + "\\n")
             sys.stderr.flush()
         time.sleep(0.02)
@@ -113,13 +135,16 @@ sys.exit(EXIT_CODE)
 
 def _write_stub(tools_dir, name, *, stdout_lines=(), stderr_lines=(),
                 stderr_flood=0, idle=False, exit_code=0, marker=None,
-                emit_bytes=None):
+                emit_bytes=None, tail_on_interrupt=None,
+                ignore_interrupt=False):
     py_path = os.path.join(tools_dir, name + ".py")
     body = _STUB_TEMPLATE.format(
         marker=marker, stdout_lines=list(stdout_lines),
         stderr_lines=list(stderr_lines), stderr_flood=stderr_flood,
         idle=idle, exit_code=exit_code,
-        emit_bytes=list(emit_bytes) if emit_bytes else None)
+        emit_bytes=list(emit_bytes) if emit_bytes else None,
+        tail_on_interrupt=tail_on_interrupt,
+        ignore_interrupt=ignore_interrupt)
     with open(py_path, "w") as f:
         f.write(body)
 
