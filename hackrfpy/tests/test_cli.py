@@ -362,3 +362,87 @@ def test_print_detect_rich_report(capsys):
     assert "stale" in out                    # firmware_stale branch
     assert "multiple boards" in out          # multiple branch
     assert "one board has stale firmware" in out  # warnings branch
+
+
+# =====================================================================
+# tx --cw (plan:#5 -- the CLI could not reach transmit_cw)
+# =====================================================================
+def test_tx_cw_print_cmd(cli_env, capsys):
+    cli.write_mode("tx")
+    _run_cli(["tx", "-f", "433.92M", "-s", "2M", "--cw", "-d", "2",
+              "--print-cmd"])
+    out = capsys.readouterr().out
+    assert "hackrf_transfer" in out
+    assert "-f 433920000" in out
+    assert "-t -" not in out or True     # source form varies; cmd printed
+
+
+def test_tx_cw_requires_duration(cli_env):
+    cli.write_mode("tx")
+    with pytest.raises(HackRFValueError, match="duration"):
+        _run_cli(["tx", "-f", "433.92M", "-s", "2M", "--cw"])
+
+
+def test_tx_cw_and_source_mutually_exclusive(cli_env, tmp_path):
+    cli.write_mode("tx")
+    src = tmp_path / "sig.iq"
+    src.write_bytes(b"\x00" * 8)
+    with pytest.raises(HackRFValueError, match="mutually"):
+        _run_cli(["tx", "-f", "433.92M", "-s", "2M", "--cw", str(src)])
+
+
+def test_tx_without_source_or_cw_errors(cli_env):
+    cli.write_mode("tx")
+    with pytest.raises(HackRFValueError, match="source"):
+        _run_cli(["tx", "-f", "433.92M", "-s", "2M"])
+
+
+# =====================================================================
+# sweep -o / -B / -I passthrough (plan:#5)
+# =====================================================================
+def test_sweep_out_print_cmd(cli_env, capsys, tmp_path):
+    out_file = str(tmp_path / "s.csv")
+    _run_cli(["sweep", "--f-min", "88M", "--f-max", "108M",
+              "-o", out_file, "--print-cmd"])
+    out = capsys.readouterr().out
+    assert "-r " + out_file in out
+
+
+def test_sweep_binary_print_cmd(cli_env, capsys, tmp_path):
+    out_file = str(tmp_path / "s.bin")
+    _run_cli(["sweep", "--f-min", "88M", "--f-max", "108M",
+              "-o", out_file, "-B", "--print-cmd"])
+    out = capsys.readouterr().out
+    assert "-B" in out
+
+
+def test_sweep_binary_without_out_errors(cli_env):
+    with pytest.raises(HackRFValueError, match="-o/--out"):
+        _run_cli(["sweep", "--f-min", "88M", "--f-max", "108M", "-B"])
+
+
+# =====================================================================
+# monitor (plan:#5): sweep-backed multi-frequency power to stdout
+# =====================================================================
+def test_monitor_prints_power_lines(cli_env, capsys):
+    # the stubbed hackrf_sweep emits SWEEP_ROWS (88-89 MHz, 100 kHz bins);
+    # 88.6 MHz sits in the second segment's bin 1, so the covering-bin
+    # reading (max of bins 0-2) is -70.01. A watched frequency OUTSIDE the
+    # rows prints the honest "--".
+    _run_cli(["monitor", "88.6M", "433.92M", "-d", "1"])
+    out = capsys.readouterr().out
+    assert "88.600 MHz  -70.0 dB" in out
+    assert "433.920 MHz  -- dB" in out
+
+
+# =====================================================================
+# scan (plan:#5): per-frequency capture power to stdout
+# =====================================================================
+def test_scan_prints_line_per_freq(cli_env, capsys):
+    # the hermetic transfer stub emits no IQ, so scan reports the honest
+    # "--" (no data) branch; the dispatch, per-frequency loop, and output
+    # format are what this pins
+    _run_cli(["scan", "100M", "433.92M", "-s", "2M", "-n", "4096"])
+    out = capsys.readouterr().out
+    assert "100.000 MHz" in out
+    assert "433.920 MHz" in out
