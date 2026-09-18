@@ -74,6 +74,35 @@ release.
 - The generated sample-data README now annotates each IQ file as a
   *(noise-floor reference)* or *(burst captured)*.
 - `.gitignore`: `tests/fm_testdata/` (deterministic, regenerable output).
+- `tests/test_interrupt_clean.py`: the clean-interrupt contract as a tested
+  guarantee on BOTH platforms, replacing the "untested on Windows" caveat in
+  `core.py`. The stub child now records WHICH signal it caught, so the tests
+  distinguish the clean interrupt (SIGINT on POSIX; SIGBREAK from
+  CTRL_BREAK_EVENT on Windows, traversing the `.bat` launcher layer like the
+  real tools) from the `terminate()` escalation -- previously a broken
+  CTRL_BREAK path could hide behind a working escalation. Also asserted:
+  output written by the child's interrupt handler is drained into `stop()`'s
+  result (the no-truncated-capture contract), and a child that ignores the
+  interrupt is still reaped and reported unclean. The Windows CI leg proves
+  the Windows path on the next push. (plan:#4, Phase 3a)
+- OS dead-man for handle-mode children (closes the long-standing
+  `TODO(os-deadman)` in `core.py`): the atexit backstop never runs on
+  SIGKILL / TerminateProcess, so a hard-killed parent could leave a
+  transmitter on the air. Now the OS itself ends the child when the parent
+  dies: Linux children set `PR_SET_PDEATHSIG` to SIGINT in preexec (the
+  CLEAN interrupt -- the dead-man is the flush path, with a `getppid()`
+  check closing the fork-window race), and Windows children are assigned to
+  a Job Object with `KILL_ON_JOB_CLOSE` (terminating the whole
+  `.bat` -> python tree; the job handle lives on the `_Process`). macOS has
+  no equivalent primitive; the atexit backstop remains the net there,
+  documented. Gated exactly like the atexit registry: TX always, RX unless
+  `backstop_rx=False`. `tests/test_deadman.py` proves it with a real
+  SIGKILL of an intermediate parent on POSIX -- the child dies AND its
+  interrupt handler ran -- plus the opt-out gate; the Windows Job Object
+  leg proves on the next CI push. (plan:#4, Phase 3b)
+- `hackrfpy.__version__`, resolved from installed package metadata
+  (`importlib.metadata`), with a `0.0.0+unknown` fallback for uninstalled
+  checkouts. (plan:#7)
 - `examples/fm_demod_to_wav.py`: the missing last mile -- demodulate a
   captured broadcast-FM IQ file to an audible mono 16-bit WAV using only
   numpy and the stdlib. Channelize (staged windowed-sinc decimation to
@@ -174,16 +203,35 @@ release.
   below 1e-9 (a few hundred taps at 200 kHz); a 2 s reference file demodulates
   in ~3 s end to end, with output identical to within 1 LSB. Stage timings are
   now printed so a future stall is self-locating.
-
-<!--
-Roadmap for this branch (append entries above as each lands):
-  - Added: type annotations across the public API; mypy promoted to a CI gate
-    (makes the shipped py.typed marker accurate).
-  - CI: --cov-fail-under=85; confirm the Windows leg exercises the CTRL_BREAK
-    lifecycle path.
-  - Docs: note that a single HackRF instance is not safe to share across
-    threads (deferred pending broader testing).
--->
+- `sweep()` / `sweep_to_file()` silently truncated the TOP of the requested
+  band: both MHz edges were floored, so `sweep(433.9e6, 434.1e6)` ran
+  `433:434` and never covered 434.0-434.1 MHz even while warning about the
+  snap. Edges now snap OUTWARD (floor the low edge, ceil the high edge) so
+  the swept range always contains the requested band; the warning text says
+  so. (plan:#2)
+- `monitor_frequencies()` reported the MEAN dB of the whole covering sweep
+  segment as the power "at" a frequency, diluting a narrowband carrier
+  toward the noise floor (a -20 dB carrier in one bin of a 10-bin segment
+  read as -74). It now reads the bin covering the frequency (max of that
+  bin +/-1 for tuning slop). Behavior change for `examples/channel_monitor.py`
+  and any monitor consumer: readings of narrowband signals rise to their
+  true level. (plan:#3)
+- Handle-mode output was not visible to the parent until process exit unless
+  the child flooded: the drain thread read pipes with `BufferedReader.read(N)`,
+  which blocks until N bytes (64 KB) accumulate, so small periodic writes --
+  e.g. hackrf_transfer's ~60-byte-per-second stats lines -- sat invisible for
+  what would be ~18 minutes of real capture. Now `read1()`: bytes appear in
+  the drain as soon as the child writes them. Found by the new clean-interrupt
+  tests; also cut the test suite's wall time roughly in half by removing the
+  same latency from every stubbed lifecycle test. (Phase 3a finding)
+- `_Process.stop()`'s escalation fired `terminate()` and returned without
+  reaping: a child that ignored the interrupt could outlive `stop()`, and
+  `result()` reported `returncode None`. The escalation is now a bounded,
+  reaped ladder (interrupt -> terminate -> kill), so `stop()` always returns
+  with the child dead and a real exit status. (Phase 3a finding)
+- `from_device()` guarded its parsed-info invariant with a bare `assert`,
+  which `python -O` strips, letting raw text flow onward; it now raises
+  `HackRFDeviceError`. (plan:#9)
 
 ## [1.0.0] - 2026-06-16
 
