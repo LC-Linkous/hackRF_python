@@ -46,14 +46,19 @@ class SweepMixin(HostOps):
         self.print_message(f"[*] mode: {self.mode}")
 
         lo = int(f_min_hz // 1_000_000)
-        hi = int(f_max_hz // 1_000_000)
+        hi = -int(-f_max_hz // 1_000_000)      # ceil: never truncate the top
         # hackrf_sweep takes integer MHz edges, so sub-MHz precision is lost.
-        # Warn rather than silently shift the band the user asked for.
+        # Snap OUTWARD (floor the low edge, ceil the high edge) so the swept
+        # range always CONTAINS the requested band -- flooring both edges
+        # silently dropped everything above the last whole MHz (e.g.
+        # 433.9:434.1 swept 433:434 and never covered 434.0-434.1). Warn so
+        # the user knows the edges moved.
         if f_min_hz % 1_000_000 or f_max_hz % 1_000_000:
             self.warn(
-                f"sweep edges snapped to MHz: "
+                f"sweep edges snapped to MHz (outward): "
                 f"{f_min_hz/1e6:g}:{f_max_hz/1e6:g} -> {lo}:{hi} MHz "
-                f"(hackrf_sweep takes integer MHz)")
+                f"(hackrf_sweep takes integer MHz; requested band fully "
+                f"covered)")
         argv = ["sweep", "-f", f"{lo}:{hi}", "-l", lna, "-g", vga,
                 "-a", 1 if amp else 0]
         if bin_width is not None:
@@ -124,13 +129,20 @@ class SweepMixin(HostOps):
         t0 = _time.time()
 
         def _nearest_power(rows_by_low: dict[int, Any], f: float) -> Any:
-            # find the sweep segment whose [hz_low, hz_high) covers f, return
-            # the mean dB of that segment's bins (a simple power proxy)
+            # find the sweep segment whose [hz_low, hz_high) covers f and
+            # return the dB of the BIN covering f (max of that bin +/-1 for
+            # tuning slop). Averaging the whole segment diluted a narrowband
+            # carrier toward the noise floor: in a 5 MHz segment a strong
+            # signal occupying one bin barely moved the mean.
             for low in sorted(rows_by_low):
                 r = rows_by_low[low]
                 if r["hz_low"] <= f < r["hz_high"]:
                     db = r["db"]
-                    return sum(db) / len(db) if db else float("-inf")
+                    if not db:
+                        return float("-inf")
+                    idx = int((f - r["hz_low"]) / r["bin_width"])
+                    idx = max(0, min(idx, len(db) - 1))
+                    return max(db[max(0, idx - 1):idx + 2])
             return None
 
         from .._stream_ctx import StreamCtx
@@ -189,7 +201,7 @@ class SweepMixin(HostOps):
         lna = self._snap_gain("lna_gain", lna, C.LNA_GAIN)
         vga = self._snap_gain("vga_gain", vga, C.VGA_GAIN)
         lo = int(f_min_hz // 1_000_000)
-        hi = int(f_max_hz // 1_000_000)
+        hi = -int(-f_max_hz // 1_000_000)      # ceil: never truncate the top
         argv = ["sweep", "-f", f"{lo}:{hi}", "-l", lna, "-g", vga,
                 "-a", 1 if amp else 0, "-r", out]
         if bin_width is not None:

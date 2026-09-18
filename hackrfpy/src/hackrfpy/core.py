@@ -492,7 +492,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # present. Use it when you want a fail-fast handle for scripting.
         h = cls(tools_dir=tools_dir, verbose=verbose, serial=serial)
         info = h.info()                      # raises if no tools / no board
-        assert isinstance(info, dict)        # raw=False -> parsed dict
+        if not isinstance(info, dict):       # raw=False -> parsed dict
+            # a plain assert is stripped under `python -O`, which would let a
+            # str flow onward; keep the guard a real, typed error
+            raise HackRFDeviceError(
+                "hackrf_info output could not be parsed into a device dict")
         if not info.get("boards"):
             raise HackRFDeviceError("no HackRF board detected")
         h._probed = info
