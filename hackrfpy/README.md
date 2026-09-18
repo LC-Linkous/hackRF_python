@@ -132,6 +132,7 @@ The [main GitHub repository](https://github.com/LC-Linkous/hackRF_python) provid
 **Sample data**
 
 - `collect_sample_data.py` — collect real IQ + sweep datasets with per-capture validation (read-only; never transmits)
+- `fm_demod_to_wav.py` — demodulate a captured FM broadcast IQ file to an audible mono WAV (numpy + stdlib only; file processing, never touches the device)
 
 **Transmit**
 
