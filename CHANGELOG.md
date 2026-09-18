@@ -28,6 +28,63 @@ release.
   (`cli.py` from 12% to ~98%).
 - Community health files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
   `SECURITY.md`, issue templates, and a pull request template.
+- `examples/channel_monitor.py`: live multi-channel power meter driven by
+  `monitor_frequencies` (one continuous sweep, ASCII bar output, no plotting
+  extra) -- the library's sweep-backed monitoring style previously had no
+  example.
+- `examples/tx_test_tone.py`: the first and only transmitting example. A
+  constant-wave test tone behind the deliberate RX->TX mode switch, with a
+  required and capped duration (10 s), a deliberately low default TX gain, the
+  RF amp never enabled, and `--print-cmd` dry-run support.
+- `tests/collect_real_FM_data.py`: records one named FM broadcast station as a
+  reference dataset for comparison against a hardware receiver implementation.
+  Writes the IQ + SigMF sidecar plus a machine-readable `.report.json` pinning
+  down exact settings, firmware/tools versions, raw-IQ health (power, clipping,
+  DC), and an FM-discriminator check for the 19 kHz stereo pilot with its SNR
+  -- the definitive "this really is the station" test. Deliberately split from
+  `tests/collect_real_data.py`, which freezes tiny verbatim parser fixtures.
+- `tests/collect_fm_testdata.py`: repeatable FM test-data generator with a
+  five-stage hardware pipeline -- discover (top-N sweep candidates), calibrate
+  (walks LNA/VGA until peak amplitude lands in [0.25, 0.70]), verify (short
+  probe per candidate; the 19 kHz pilot must show at the tuning offset before
+  any full recording, making the script robust to time-of-day and weather
+  propagation changes), record (station parked at +300 kHz, clear of the DC
+  spike), validate. Falls back (`--fallback auto|always|never`) to a
+  deterministic synthetic FM recording (fixed-seed; byte-identical every run)
+  in the identical int8 + SigMF format, so downstream pipelines are never
+  blocked by RF conditions or a missing board. Reports log every candidate
+  tried with its pilot SNR, keeping runs at different times comparable.
+- Per-capture validation in `examples/collect_sample_data.py`: short reads,
+  dead/quiet front end, gain-induced clipping, stuck DC, and ADC utilization
+  (peak amplitude < 0.1, i.e. fewer than ~13 of 127 int8 codes) are flagged.
+  Validation is band-aware: bands are tagged `continuous` (fm), `bursty`
+  (airband, ism433, ism915), or `scheduled` (noaa), and low utilization is a
+  hard SUSPECT only for continuous bands -- on bursty bands a quiet window is
+  correct data and is annotated as a noise-floor reference instead. A
+  peak-to-median burst-ratio metric reports detected activity. Suspect
+  captures are kept on disk but flagged on stderr, marked in the generated
+  sample-data README, and the script exits 2 so a bad collection run cannot
+  silently ship. (Motivated by a real 2026-09-17 run whose captures spanned
+  only +/-4 of 127 int8 codes -- effectively 3-bit recordings -- while passing
+  every earlier check.)
+- `--hunt` / `--hunt-secs` in `examples/collect_sample_data.py`: for bursty
+  bands, probe in 100 ms slices until a transmission appears (burst ratio
+  >= 10 dB), then take the real capture -- so an ISM sample can be made to
+  actually contain a burst (e.g. by pressing a key fob during the hunt window).
+- The generated sample-data README now annotates each IQ file as a
+  *(noise-floor reference)* or *(burst captured)*.
+- `.gitignore`: `tests/fm_testdata/` (deterministic, regenerable output).
+- `examples/fm_demod_to_wav.py`: the missing last mile -- demodulate a
+  captured broadcast-FM IQ file to an audible mono 16-bit WAV using only
+  numpy and the stdlib. Channelize (staged windowed-sinc decimation to
+  200 kHz), FM-discriminate, 75 us de-emphasis (`--deemph 50` for regions
+  using 50 us), 15 kHz audio lowpass to a 50 kHz WAV. Handles off-center
+  stations via `--offset` (e.g. 300e3 for `collect_fm_testdata.py` output)
+  and prints a multiplex readout proving the 19 kHz pilot, 38 kHz stereo
+  subcarrier, and 57 kHz RDS are present in the discriminator output.
+  Developed and verified against the 2026-09-17 98.1 MHz reference capture:
+  the output audio shows music-shaped spectra, syllabic-band envelope
+  modulation, and spectral flatness 0.09 (structured content, not noise).
 
 ### Changed
 - Library diagnostics now go through the standard `logging` module instead of
@@ -49,6 +106,35 @@ release.
   `5 - Production/Stable` to match the 1.0.0 release.
 - Ruff configuration added (`line-length = 100`, `select = ["E", "F", "W"]`), and
   the codebase made lint-clean so the CI lint job is meaningful.
+- `examples/persistent_capture.py` rewritten to match its name and the README's
+  description: a gapless segment collector draining ONE long-lived
+  `open_receiver()` stream into back-to-back `seg_NNN.iq` files with SigMF
+  sidecars (contrast with `capture(segment_secs=...)`, whose per-file process
+  re-open leaves a short gap between files). The file had been a near-duplicate
+  of `waterfall_persistent.py` whose own header pointed at the wrong filename.
+- `examples/waterfall_persistent.py` absorbed the improvements stranded in that
+  duplicate: frame-averaged spectra, DC/LO-leakage spike suppression, and
+  large-block reads so the pipe drains fast enough to keep `hackrf_transfer`
+  streaming at 10 Msps.
+- `hackrfpy/README.md` examples list corrected (`persistent_capture.py` entry
+  now matches the code) and extended with the new examples, including a new
+  Transmit section.
+- `examples/collect_sample_data.py` defaults: collects three bands (fm,
+  ism433, ism915) instead of one, and exposes `--lna` / `--vga` with defaults
+  raised to 32 / 28 (the old library defaults of 16 / 20 produced the 3-bit
+  captures described above).
+- `tests/collect_real_FM_data.py` defaults: gains raised to LNA 32 / VGA 28,
+  and default sample rate raised from 2 Msps to 8 Msps -- the HackRF's
+  baseband filter bottoms out at 1.75 MHz, so rates under 8 Msps admit
+  aliases; a reference recording deserves the alias-free version at the price
+  of larger files.
+- `tests/collect_fm_testdata.py` captures at an integer multiple of the
+  requested output rate that clears 8 Msps and decimates in software
+  (windowed-sinc FIR) back down, so output files are unchanged (2 Msps int8 +
+  SigMF by default) while discovery and demodulation run alias-free. Offline
+  verification: an interferer 1.7 MHz off-channel, which a direct 2 Msps
+  capture folds onto the demod region, is suppressed ~45 dB while the pilot
+  survives at ~72 dB SNR.
 
 ### Fixed
 - The `atexit` backstop never reaped an orphaned `PersistentReceiver`.
@@ -79,6 +165,15 @@ release.
   directory on every run.
 - `CITATION.cff` version and release date corrected to `1.0.0` / `2026-06-16`,
   aligning the citation metadata with `pyproject.toml` and the tagged release.
+- Removed a stray `hackrfpy/capture.sigmf-meta` at the package root, left over
+  from a July test run at 433.92 MHz.
+- `examples/fm_demod_to_wav.py` de-emphasis was accidentally quadratic: each
+  64 K block was convolved against a full-block-length geometric kernel
+  (~5e10 multiply-adds for a 2 s / 8 Msps capture), stalling the script after
+  the multiplex readout. The kernel is now truncated where its weight falls
+  below 1e-9 (a few hundred taps at 200 kHz); a 2 s reference file demodulates
+  in ~3 s end to end, with output identical to within 1 LSB. Stage timings are
+  now printed so a future stall is self-locating.
 
 <!--
 Roadmap for this branch (append entries above as each lands):
