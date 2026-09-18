@@ -63,28 +63,41 @@ OUT_DIR = os.path.join(_HERE, "sample_data")
 BANDS = {
     "fm": {
         "center": 98_000_000, "sweep": (88_000_000, 108_000_000),
-        "desc": "FM broadcast band"},
+        "desc": "FM broadcast band", "signal": "continuous"},
     "airband": {
         "center": 124_000_000, "sweep": (118_000_000, 137_000_000),
-        "desc": "VHF airband (AM voice)"},
+        "desc": "VHF airband (AM voice)", "signal": "bursty"},
     "ism433": {
         "center": 433_920_000, "sweep": (433_000_000, 435_000_000),
-        "desc": "433 MHz ISM"},
+        "desc": "433 MHz ISM", "signal": "bursty"},
     "ism915": {
         "center": 915_000_000, "sweep": (902_000_000, 928_000_000),
-        "desc": "915 MHz ISM (US)"},
+        "desc": "915 MHz ISM (US)", "signal": "bursty"},
     "noaa": {
         "center": 137_500_000, "sweep": (137_000_000, 138_000_000),
-        "desc": "NOAA weather satellite downlink"},
+        "desc": "NOAA weather satellite downlink", "signal": "scheduled"},
 }
 
 
-def _validate_capture(iq, expected_n):
+def _burst_ratio_db(iq):
+    # Peak-to-median magnitude: >~10 dB means something transmitted during
+    # the window; near 0 dB means the window is pure noise floor.
+    if not len(iq):
+        return 0.0
+    mag = np.abs(iq)
+    med = float(np.median(mag)) + 1e-9
+    return 10 * np.log10((float(mag.max()) / med) ** 2)
+
+
+def _validate_capture(iq, expected_n, signal="continuous"):
     # Catch the failure modes of a bad collection run BEFORE the data goes
     # into the sample library: short reads, a dead/disconnected front end
     # (pure noise-floor silence), a stuck DC rail, and gain-induced clipping.
-    # Returns (ok, [reasons]).
-    reasons = []
+    # Band-aware: a CONTINUOUS band (FM broadcast) with a tiny peak is a bad
+    # capture, but a BURSTY band (ISM) with a tiny peak usually means nothing
+    # transmitted during the window -- correct data, noted, not SUSPECT.
+    # Returns (ok, [reasons], [notes]).
+    reasons, notes = [], []
     if len(iq) < 0.9 * expected_n:
         reasons.append(f"short read ({len(iq)}/{expected_n} samples)")
     if len(iq):
@@ -95,9 +108,20 @@ def _validate_capture(iq, expected_n):
                            "dead antenna / wrong gain?)")
         peak = float(mag.max())
         if peak < 0.1:
-            reasons.append(f"low ADC utilization (peak {peak:.3f} < 0.1, "
-                           f"~{int(peak*128)} of 127 int8 codes -- raise "
-                           "LNA/VGA; see examples/calibrate.py)")
+            msg = (f"low ADC utilization (peak {peak:.3f} < 0.1, "
+                   f"~{int(peak*128)} of 127 int8 codes)")
+            if signal == "continuous":
+                reasons.append(msg + " -- raise LNA/VGA; see "
+                               "examples/calibrate.py")
+            else:
+                notes.append(msg + f" -- normal for a {signal} band with no "
+                             "transmission in the window; data is a "
+                             "noise-floor reference (try --hunt to catch a "
+                             "burst)")
+        if signal != "continuous":
+            br = _burst_ratio_db(iq)
+            if br >= 10.0:
+                notes.append(f"activity detected (burst ratio {br:.0f} dB)")
         clip = float(np.mean(mag > 0.99))
         if clip > 0.01:
             reasons.append(f"clipping ({clip*100:.1f}% of samples -- "
@@ -107,7 +131,7 @@ def _validate_capture(iq, expected_n):
             reasons.append(f"large DC offset ({dc:.3f})")
     else:
         reasons.append("empty capture")
-    return (not reasons), reasons
+    return (not reasons), reasons, notes
 
 
 def _signal_summary(iq):
@@ -121,7 +145,7 @@ def _signal_summary(iq):
     return f"mean {db:.1f} dBFS, peak |amp| {peak:.3f}"
 
 
-def collect_band(h, name, args, suspects):
+def collect_band(h, name, args, suspects, file_notes):
     band = BANDS[name]
     os.makedirs(OUT_DIR, exist_ok=True)
     n = int(args.sample_rate * args.seconds)
@@ -132,6 +156,25 @@ def collect_band(h, name, args, suspects):
     print(f"\n== {name}: IQ capture @ {band['center']/1e6:g} MHz "
           f"({args.seconds}s, {args.sample_rate/1e6:g} Msps) ==")
     try:
+        if args.hunt and band.get("signal") in ("bursty", "scheduled"):
+            # Probe in short slices until something transmits, THEN take the
+            # real capture -- so a bursty band's sample actually contains a
+            # burst. Press a key fob / doorbell during the hunt to help.
+            print(f"  hunting for a burst (up to {args.hunt_secs:g}s; "
+                  "trigger: peak > 3x median)...")
+            import time as _time
+            t0 = _time.time()
+            while _time.time() - t0 < args.hunt_secs:
+                probe = h.capture_array(band["center"], args.sample_rate,
+                                        int(args.sample_rate * 0.1),
+                                        lna=args.lna, vga=args.vga)
+                if len(probe) and _burst_ratio_db(probe) >= 10.0:
+                    print(f"  burst seen after {_time.time()-t0:.1f}s -- "
+                          "capturing now")
+                    break
+            else:
+                print("  no burst within the hunt window; capturing "
+                      "noise floor anyway")
         h.capture(band["center"], args.sample_rate, num_samples=n,
                   out=iq_path, sigmf=True, lna=args.lna, vga=args.vga)
         iq = load_iq(iq_path)
@@ -139,7 +182,13 @@ def collect_band(h, name, args, suspects):
         print(f"  wrote {os.path.basename(iq_path)} "
               f"({size_mb:.1f} MB, {len(iq)} samples) -- {_signal_summary(iq)}")
         print(f"  + {os.path.basename(iq_path).rsplit('.',1)[0]}.sigmf-meta")
-        ok, reasons = _validate_capture(iq, n)
+        ok, reasons, notes = _validate_capture(
+            iq, n, band.get("signal", "continuous"))
+        for note in notes:
+            print(f"  [i] {note}")
+        if notes:
+            file_notes[iq_path] = ("burst captured" if any(
+                "activity" in x for x in notes) else "noise-floor reference")
         if not ok:
             print("  [!] SUSPECT capture -- " + "; ".join(reasons),
                   file=sys.stderr)
@@ -174,7 +223,8 @@ def collect_band(h, name, args, suspects):
     return results
 
 
-def write_readme(collected, args, det, suspects=()):
+def write_readme(collected, args, det, suspects=(), file_notes=None):
+    file_notes = file_notes or {}
     # A README for the sample library so the data is self-documenting.
     path = os.path.join(OUT_DIR, "README.md")
     with open(path, "w", newline="\n") as f:
@@ -197,7 +247,8 @@ def write_readme(collected, args, det, suspects=()):
         for p in collected:
             flag = "  **(SUSPECT -- failed validation; re-collect)**" \
                 if p in suspects else ""
-            f.write(f"- `{os.path.basename(p)}`{flag}\n")
+            note = f"  *({file_notes[p]})*" if p in file_notes else ""
+            f.write(f"- `{os.path.basename(p)}`{flag}{note}\n")
     print(f"\n  wrote {os.path.relpath(path, _HERE)}")
 
 
@@ -219,6 +270,12 @@ def main():
                         "16 produced ~3-bit captures on 2026-09-17)")
     p.add_argument("--vga", type=int, default=28,
                    help="VGA gain dB (default 28)")
+    p.add_argument("--hunt", action="store_true",
+                   help="for bursty bands (ISM, airband): probe until a "
+                        "transmission appears before capturing, so the "
+                        "sample contains an actual burst")
+    p.add_argument("--hunt-secs", type=float, default=30.0,
+                   help="max seconds to hunt per band (default 30)")
     p.add_argument("--no-sweep", action="store_true",
                    help="IQ captures only, skip sweep datasets")
     args = p.parse_args()
@@ -236,13 +293,14 @@ def main():
 
     collected = []
     suspects = []
+    file_notes = {}
     try:
         for name in bands:
-            collected += collect_band(h, name, args, suspects)
+            collected += collect_band(h, name, args, suspects, file_notes)
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
     if collected:
-        write_readme(collected, args, det, suspects)
+        write_readme(collected, args, det, suspects, file_notes)
         total = sum(os.path.getsize(p) for p in collected
                     if p.endswith(".iq")) / 1e6
         print(f"\n== done: {len(collected)} files, ~{total:.1f} MB of IQ "
