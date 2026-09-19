@@ -11,6 +11,23 @@ Work on the current development branch. Entries move to a versioned section on
 release.
 
 ### Added
+- Linux promoted from experimental to hardware-verified. Verification run
+  2026-09-19 on Debian 12 (bookworm, kernel 6.12.95, Dell Latitude 7420)
+  with `hackrf` 2022.09.1 and firmware 2024.02.1: full test suite including
+  all hardware tests, 227/227, cross-checked the same day on Windows with
+  hardware at 227/227 on identical bytes. Per the platform policy, Linux
+  re-enters the CI matrix under the same standards as Windows (85% coverage
+  gate, hardware evidence for core changes), which also returns the Linux
+  `pdeathsig` dead-man path to regression testing. The verification itself
+  surfaced the two process-lifecycle bugs fixed below (frozen-writer USB
+  claim leak; open-retry race) -- the strongest possible argument for
+  requiring it. `SETUP_LINUX.md` (Debian-family setup + the verification
+  sequence) is now in the repo; platform language updated in the READMEs
+  and CONTRIBUTING; macOS remains experimental pending its own board run.
+- Housekeeping: `hackrfpy/tests/fm_testdata/` outputs are regenerable and
+  were never meant to be committed; the `.gitignore` entry pointed at the
+  wrong path (`tests/fm_testdata/`), so three generated files were tracked.
+  Path fixed, files untracked.
 - Type annotations across the entire shipped package, and `mypy` promoted to a
   blocking CI gate (`disallow_untyped_defs`). The package has always shipped a
   `py.typed` marker, which tells downstream type-checkers the inline annotations
