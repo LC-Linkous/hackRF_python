@@ -21,9 +21,10 @@ release.
   `pdeathsig` dead-man path to regression testing. The verification itself
   surfaced the two process-lifecycle bugs fixed below (frozen-writer USB
   claim leak; open-retry race) -- the strongest possible argument for
-  requiring it. `SETUP_LINUX.md` (Debian-family setup + the verification
-  sequence) is now in the repo; platform language updated in the READMEs
-  and CONTRIBUTING; macOS remains experimental pending its own board run.
+  requiring it. Debian-family setup notes and the verification sequence are
+  merged into the main README (Linux Setup section); platform language
+  updated in both READMEs and CONTRIBUTING; macOS remains experimental
+  pending its own board run.
 - Housekeeping: `hackrfpy/tests/fm_testdata/` outputs are regenerable and
   were never meant to be committed; the `.gitignore` entry pointed at the
   wrong path (`tests/fm_testdata/`), so three generated files were tracked.
