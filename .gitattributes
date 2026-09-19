@@ -1,0 +1,18 @@
+# Line-ending policy: LF everywhere, on every platform.
+# Identical working trees on Windows and Linux mean one patch/diff flavor
+# and byte-identical checkouts; modern Windows tooling is LF-clean.
+* text=auto eol=lf
+
+# Binary payloads: never normalize.
+*.iq  binary
+*.wav binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bin binary
+
+# Frozen verbatim fixtures are byte-exact by definition: real tool output
+# captured for parser tests. Normalizing their line endings would silently
+# alter the very bytes they exist to preserve.
+hackrfpy/tests/fixtures/** -text
