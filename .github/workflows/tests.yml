@@ -26,13 +26,14 @@ jobs:
       matrix:
         # windows-latest is first because it is the platform this library
         # targets; the cross-platform lifecycle stubs must pass there.
-        # ubuntu was removed from the matrix 2026-09-18: CI standards track
-        # HARDWARE-VERIFIED platforms, and Linux has not been verified
-        # against a real board. When it is, it returns here and is held to
-        # the same standards (85% gate, hardware-test evidence for core
-        # changes). Note the Linux pdeathsig dead-man path only executes on
-        # a Linux runner, so it is regression-untested until then.
-        os: [windows-latest, macos-latest]
+        # ubuntu re-entered the matrix 2026-09-19: Linux was verified
+        # against a real board (Debian 12, full suite incl. hardware tests,
+        # 227/227) and is held to the same standards as Windows. This also
+        # puts the Linux pdeathsig dead-man path back under regression
+        # testing. The verification itself surfaced and fixed two lifecycle
+        # bugs (frozen-writer USB-claim leak; open-retry race) -- see the
+        # CHANGELOG.
+        os: [windows-latest, ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
