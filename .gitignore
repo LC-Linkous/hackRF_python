@@ -216,4 +216,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-tests/fm_testdata/
+hackrfpy/tests/fm_testdata/
