@@ -240,6 +240,37 @@ release.
   survives at ~72 dB SNR.
 
 ### Fixed
+- Abandoning a live stream could leak a child that held the USB claim for
+  the rest of the process: with the consumer gone, the 64 KB stdout pipe
+  fills in milliseconds at capture rates and the child blocks inside
+  write(); hackrf tools' SIGINT/SIGTERM handlers only set an exit flag that
+  a blocked write never returns to check, and the breakout teardown ended
+  at an unreaped terminate() -- so hackrf_transfer stayed frozen in
+  write(), and every later open in the same process failed
+  `hackrf_open() failed: Resource busy (-1000)`. Found on the Linux
+  hardware verification run: a wall of 7 failures starting immediately
+  after the two stream-breakout tests, unmoved by open-retries (the claim
+  was held, not slow to release). Teardown now gives the clean interrupt a
+  short window with the pipe open (well-behaved children still flush and
+  exit cleanly -- tested), then closes the read end so a frozen write
+  becomes EPIPE and the child can die (the kernel releases the USB claim
+  on any death), then completes the terminate -> kill ladder. Three
+  regression tests reproduce the frozen-writer state with a deaf, flooding
+  stub and pin bounded teardown, immediate reopen, and the preserved
+  clean-exit window.
+- Rapid back-to-back device operations could fail with
+  `hackrf_open() failed: Resource busy (-1000)`: after a `hackrf_*` child
+  exits, the kernel takes a moment to release its USB claim, and the next
+  open can lose that race -- found on the first real-hardware Linux run,
+  where 7 hardware tests failed with exactly this error (Windows' USB stack
+  never exposed it). The library now absorbs it with bounded, backed-off
+  retries in every acquisition mode: blocking/timed runs re-invoke, and
+  streaming paths (sweep, monitor, the persistent receiver) respawn only if
+  the child died busy BEFORE yielding anything -- once data has flowed, a
+  busy error cannot be a stale-claim race and is raised as-is. Tunable via
+  `busy_retries` (default 3) and `busy_backoff` (0.25 s, doubling);
+  `busy_retries=0` restores fail-fast. The test stub can now simulate the
+  race (`busy_fails=N`), and five tests pin the behavior across modes.
 - The `atexit` backstop never reaped an orphaned `PersistentReceiver`.
   `PersistentReceiver` registers itself in the live-handle registry, whose
   shutdown hook calls `if h.is_alive(): h.stop()` -- but `is_alive()` did not
