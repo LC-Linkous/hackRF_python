@@ -84,7 +84,7 @@ release.
   output written by the child's interrupt handler is drained into `stop()`'s
   result (the no-truncated-capture contract), and a child that ignores the
   interrupt is still reaped and reported unclean. The Windows CI leg proves
-  the Windows path on the next push. (plan:#4, Phase 3a)
+  the Windows path on the next push.
 - OS dead-man for handle-mode children (closes the long-standing
   `TODO(os-deadman)` in `core.py`): the atexit backstop never runs on
   SIGKILL / TerminateProcess, so a hard-killed parent could leave a
@@ -99,13 +99,32 @@ release.
   `backstop_rx=False`. `tests/test_deadman.py` proves it with a real
   SIGKILL of an intermediate parent on POSIX -- the child dies AND its
   interrupt handler ran -- plus the opt-out gate; the Windows Job Object
-  leg proves on the next CI push. (plan:#4, Phase 3b)
-- SigMF spec compliance is now tested, not trusted (plan:#8): the official
+  leg proves on the next CI push.
+- No-board detection reported nothing useful on Linux: `hackrf_info` there
+  prints its version lines and "No HackRF boards found." to STDOUT and
+  exits 1 with an empty stderr, so `detect()` raised on the exit code and
+  discarded everything -- `problem` came back blank and `tools_version`
+  `None`. `detect()` now parses whatever the tool printed regardless of
+  exit code and reports the tool's own words, and tool errors in general
+  fall back to the last stdout line when stderr is empty. Found and
+  verified against the real 2023.01.1 Linux binaries (no board attached);
+  regression tests pin both behaviors.
+- Documentation refresh across both READMEs and CONTRIBUTING: the root
+  README's claim that an OS-level dead-man was "not yet implemented" (it now
+  is, and is tested), four dangling links to a `project_summary.md` that does
+  not exist (scope statements are now inline), the CLI reference extended
+  with `monitor`, `scan`, `sweep -o/-B/-I`, and `tx --cw`, the
+  `monitor_frequencies` notes now state the covering-bin semantics, the
+  package README's features/platform/transmit sections updated for the
+  lifecycle-safety work, CONTRIBUTING's "mypy (advisory for now)" corrected
+  to blocking, and the PR checklist extended (changelog entry, docstring
+  gate, coverage gate).
+- SigMF spec compliance is now tested, not trusted: the official
   `sigmf` package joined the dev dependency group, and the sidecar writer's
   output is validated with it -- including that the `hackrf` extension is
   DECLARED, not just used (a strict-validator rejection that regressed once
   pre-1.0). GNU Radio / IQEngine interop is a tested property.
-- Docstrings across the entire public API (plan:#1): every public method on
+- Docstrings across the entire public API: every public method on
   `HackRF` and `PersistentReceiver`, both classes, and the module-level
   functions -- 60 docstrings where `help()` previously returned nothing.
   The documentation used to live only in `#` comments, invisible to
@@ -115,7 +134,7 @@ release.
   enforced parent-side, so a copied `--print-cmd` argv carries NO time
   bound. `tests/test_docstrings.py` gates the whole surface so it cannot
   drift back to undocumented.
-- CLI catch-up with the library (plan:#5), each command with tests:
+- CLI caught up with the library, each command with tests:
   `hrf tx --cw` (a bounded CW test tone; requires `-d/--duration` because an
   unbounded carrier is exactly the orphan-transmitter risk the library
   exists to prevent; `--cw-amplitude` defaults below full scale),
@@ -128,13 +147,13 @@ release.
   threads -- per-instance mutable state (`last_params`, persisted mode,
   logging wiring) and per-child drain threads. One instance per thread;
   instances are cheap. In the README and on the class.
-- Coverage policy recorded in CONTRIBUTING (plan:#11): CI gates at
+- Coverage policy recorded in CONTRIBUTING: CI gates at
   `--cov-fail-under=82`, deliberately under the measured 85% because that
   figure counts Windows-only and hardware-only code as missed on Linux legs;
   to be revisited upward after the docstring pass.
 - `hackrfpy.__version__`, resolved from installed package metadata
   (`importlib.metadata`), with a `0.0.0+unknown` fallback for uninstalled
-  checkouts. (plan:#7)
+  checkouts.
 - `examples/fm_demod_to_wav.py`: the missing last mile -- demodulate a
   captured broadcast-FM IQ file to an audible mono 16-bit WAV using only
   numpy and the stdlib. Channelize (staged windowed-sinc decimation to
@@ -148,6 +167,29 @@ release.
   modulation, and spectral flatness 0.09 (structured content, not noise).
 
 ### Changed
+- CI platform policy: the test matrix now contains hardware-verified
+  platforms only -- currently Windows (primary) and macOS -- and Linux was
+  removed until it is verified against a real board, at which point it
+  returns under the same standards. The coverage gate rose from 82% to an
+  85% minimum on every remaining leg, and the codecov upload moved from the
+  removed Linux leg to the Windows 3.12 leg. Known consequence, recorded in
+  the workflow comment: the Linux `pdeathsig` dead-man path only executes on
+  a Linux runner, so it is regression-untested until Linux re-enters the
+  matrix.
+- CONTRIBUTING policy rewrite to match: 85% minimum coverage, the
+  hardware-verified-platforms rule, and a new requirement that any change
+  under `src/hackrfpy/` include evidence of a full-suite run (hardware tests
+  passing) on Windows with a real board -- CI cannot attach hardware, so
+  that gate is enforced by review. The `needs_tools` test category (real
+  binaries on PATH, no board needed) is now documented, which is why
+  passed/skipped counts differ between machines.
+- Second documentation pass: the root README's local-install line pinned a
+  two-versions-stale wheel name (now a wildcard), its testing notes still
+  described the Windows CTRL_BREAK path as untested (it now points at the
+  tests that prove it), and its repo tree was missing three examples; the
+  package README's platform section now records the real-binaries Linux
+  verification and the Windows-EXE-on-Linux non-goal, and gained a CLI
+  quick-start.
 - Library diagnostics now go through the standard `logging` module instead of
   `print()`. Records are emitted on the `hackrfpy` logger: warnings at
   `WARNING`, verbose progress messages at `INFO`. A consumer can now route,
@@ -240,14 +282,14 @@ release.
   `433:434` and never covered 434.0-434.1 MHz even while warning about the
   snap. Edges now snap OUTWARD (floor the low edge, ceil the high edge) so
   the swept range always contains the requested band; the warning text says
-  so. (plan:#2)
+  so.
 - `monitor_frequencies()` reported the MEAN dB of the whole covering sweep
   segment as the power "at" a frequency, diluting a narrowband carrier
   toward the noise floor (a -20 dB carrier in one bin of a 10-bin segment
   read as -74). It now reads the bin covering the frequency (max of that
   bin +/-1 for tuning slop). Behavior change for `examples/channel_monitor.py`
   and any monitor consumer: readings of narrowband signals rise to their
-  true level. (plan:#3)
+  true level.
 - Handle-mode output was not visible to the parent until process exit unless
   the child flooded: the drain thread read pipes with `BufferedReader.read(N)`,
   which blocks until N bytes (64 KB) accumulate, so small periodic writes --
@@ -255,15 +297,17 @@ release.
   what would be ~18 minutes of real capture. Now `read1()`: bytes appear in
   the drain as soon as the child writes them. Found by the new clean-interrupt
   tests; also cut the test suite's wall time roughly in half by removing the
-  same latency from every stubbed lifecycle test. (Phase 3a finding)
+  same latency from every stubbed lifecycle test. (Found by the new
+  clean-interrupt tests.)
 - `_Process.stop()`'s escalation fired `terminate()` and returned without
   reaping: a child that ignored the interrupt could outlive `stop()`, and
   `result()` reported `returncode None`. The escalation is now a bounded,
   reaped ladder (interrupt -> terminate -> kill), so `stop()` always returns
-  with the child dead and a real exit status. (Phase 3a finding)
+  with the child dead and a real exit status. (Found by the new
+  clean-interrupt tests.)
 - `from_device()` guarded its parsed-info invariant with a bare `assert`,
   which `python -O` strips, letting raw text flow onward; it now raises
-  `HackRFDeviceError`. (plan:#9)
+  `HackRFDeviceError`.
 
 ## [1.0.0] - 2026-06-16
 

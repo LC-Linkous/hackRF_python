@@ -19,20 +19,21 @@ This repository uses official resources and documentation but is **NOT** endorse
 
 - **Device Discovery** — detect and identify connected HackRF boards, report firmware and identity
 - **IQ Capture** — bounded, timed, streaming, or callback-style receive; decoded to normalized `complex64`
-- **Spectrum Sweep** — collect or stream `hackrf_sweep` output across a frequency range
+- **Spectrum Sweep** — collect or stream `hackrf_sweep` output across a frequency range, plus multi-frequency power monitoring over time
 - **Transmit** — file playback and constant-wave test mode, behind a deliberate TX-mode gate
 - **Operating Envelope** — per-parameter range checks and gain snapping against the device's real steps
 - **SigMF Recordings** — self-describing `.iq` captures with metadata sidecars
 - **Error Handling** — a typed exception hierarchy and verbose output options
+- **Lifecycle Safety** — clean interrupts on both platforms, an `atexit` backstop, and an OS dead-man (pdeathsig / Job Object) so even a hard-killed script cannot orphan a transmitter
 - **CLI** — the `hrf` command-line shell over the full API
 
 ## Platform support
 
 hackrfpy is developed and tested on **Windows**. Running the `hackrf-tools` binaries as subprocesses — rather than binding to `libhackrf` through a C extension — is a deliberate choice so that no compiler or build step is required, which is the main friction point for using a HackRF on Windows.
 
-The library is *written* to be cross-platform: binary discovery goes through `shutil.which`, and process control uses `SIGINT` on POSIX and `CTRL_BREAK` on Windows. The `hackrf-tools` binaries are themselves native to Linux and macOS, and the wrapper's non-hardware mechanics (binary resolution, process lifecycle, sweep streaming, IQ decode) pass in CI on Linux. So the library is **expected** to work on Linux and macOS.
+The library is *written* to be cross-platform: binary discovery goes through `shutil.which`, and process control uses `SIGINT` on POSIX and `CTRL_BREAK` on Windows — with the interrupt, flush, and dead-man paths covered by tests on both platforms (no Windows skips). The `hackrf-tools` binaries are themselves native to Linux and macOS. On Linux, the wrapper has been verified against the **real native binaries** (hackrf-tools 2023.01.1 via `apt install hackrf`, no board attached): tool resolution, environment preflight, command construction, no-board detection, and error reporting all work as documented, and the full non-hardware test suite passes in CI there. One thing that does **not** work — and never will — is pointing `tools_dir` at the *Windows* `.EXE` bundle from a Linux machine; each platform uses its own native tools.
 
-However, it has **not yet been verified against a real HackRF board** on Linux or macOS. Treat those platforms as **experimental** for now. If you try it there, please [open an issue](https://github.com/LC-Linkous/hackRF_python/issues) to report success or trouble — confirmation from real hardware is exactly what's needed to promote them to supported.
+What remains **unverified on Linux and macOS is board-attached operation** — capture, sweep, and transmit against real hardware. Treat that as **experimental** for now. If you run it there with a board, please [open an issue](https://github.com/LC-Linkous/hackRF_python/issues) to report success or trouble — confirmation from real hardware is exactly what's needed to promote those platforms to supported.
 
 ## Installation
 
@@ -88,6 +89,17 @@ for r in rows:
     print(r["hz_low"], r["hz_high"], min(r["db"]), max(r["db"]))
 ```
 
+The same operations are available from the shell via the `hrf` entry point:
+
+```bash
+hrf detect                          # is a board attached and ready?
+hrf rx -f 433.92M -s 8M -n 2000000 -o capture.iq
+hrf sweep --f-min 88M --f-max 108M
+hrf monitor 98.1M 103.7M -d 10      # power over time on several frequencies
+```
+
+Frequencies accept unit suffixes (`433.92M`, `1.09G`), and most commands take `--print-cmd` to show the underlying `hackrf_*` invocation without running it. The full CLI reference is in the repository README.
+
 ## Transmitting
 
 Transmit is gated behind an explicit mode switch, because an accidental transmit is the one operation that can damage equipment or break the law:
@@ -99,6 +111,8 @@ h = HackRF()
 h.set_mode("tx")                # prints the TX-mode safety banner
 h.transmit(433.92e6, 8e6, "signal.iq", txvga=20)
 ```
+
+A bounded constant-wave test tone is available without a source file: `h.transmit_cw(433.92e6, 2e6, duration=2)`, or `hrf tx --cw -f 433.92M -s 2M -d 2` from the CLI (the duration is mandatory there — an unbounded carrier is exactly the risk the gates exist to prevent). Behind the mode gate sit an `atexit` backstop and an OS dead-man, so even a hard-killed script cannot leave a transmitter on the air.
 
 **Transmitting is regulated.** You are responsible for operating within the law and within your equipment's limits.
 
@@ -151,7 +165,7 @@ The [main GitHub repository](https://github.com/LC-Linkous/hackRF_python) provid
 
 ## Documentation
 
-For comprehensive documentation, the full method reference, the CLI reference, and the operating envelope:
+Every public method carries a docstring: `help(hackrfpy.HackRF)` or `python -m pydoc hackrfpy` is the offline method reference, and a test gates the whole surface so it cannot drift. For the narrative documentation, the CLI reference, and the operating envelope:
 
 - **Library GitHub repository**: [https://github.com/LC-Linkous/hackRF_python/](https://github.com/LC-Linkous/hackRF_python/)
 - **Official HackRF documentation**: [https://hackrf.readthedocs.io/](https://hackrf.readthedocs.io/) (not associated with this library)

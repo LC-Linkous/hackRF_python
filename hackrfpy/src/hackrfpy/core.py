@@ -764,8 +764,17 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # timed runs end via our SIGINT, so a non-zero rc there is expected.
         if check and mode != "timed" and rc not in (0, None):
             errtxt = err.decode(errors="replace") if isinstance(err, bytes) else err
+            detail = errtxt.strip()
+            if not detail:
+                # some tools report failures on STDOUT with an empty stderr
+                # (Linux hackrf_info prints "No HackRF boards found." there,
+                # exit 1) -- without this fallback the error read
+                # "exited 1: " with the actual reason discarded
+                outtxt = out.decode(errors="replace") if isinstance(out, bytes) else (out or "")
+                tail = [ln for ln in outtxt.splitlines() if ln.strip()]
+                detail = tail[-1].strip() if tail else ""
             raise HackRFDeviceError(
-                f"{C.TOOLS[argv[0]]} exited {rc}: {errtxt.strip()}")
+                f"{C.TOOLS[argv[0]]} exited {rc}: {detail}")
         return out, err, rc
 
     @staticmethod

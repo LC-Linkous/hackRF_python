@@ -69,7 +69,13 @@ class InfoMixin(HostOps):
                   "tools_version": None, "libhackrf_version": None,
                   "multiple": False, "warnings": [], "problem": None}
         try:
-            out, _, _ = self._run(["info"], mode="blocking", text=True)
+            # check=False: with no board attached, Linux hackrf_info exits 1
+            # AFTER printing its version lines and the reason to STDOUT
+            # (stderr empty). Raising on the exit code threw all of that
+            # away -- tools_version came back None and problem was blank.
+            # Parse whatever it printed; the exit code is not the signal here.
+            out, _, _ = self._run(["info"], mode="blocking", text=True,
+                                  check=False)
         except HackRFDeviceError as e:
             # hackrf_info couldn't run at all (binary missing). Surface it as a
             # problem rather than raising, so detect() is always safe to call.
@@ -111,7 +117,12 @@ class InfoMixin(HostOps):
             result["problem"] = ("a USB device was enumerated but did not "
                                  "identify as a HackRF")
         elif not result["found"]:
-            result["problem"] = "no HackRF board detected (check USB / drivers)"
+            # prefer the tool's own words when it stated a reason
+            stated = next((ln.strip() for ln in out.splitlines()
+                           if ln.strip().lower().startswith("no hackrf")), None)
+            result["problem"] = (f"{stated} (check USB / drivers)" if stated
+                                 else "no HackRF board detected "
+                                      "(check USB / drivers)")
         return result
 
     def identify(self, serial: str | None = None) -> dict[str, Any] | None:

@@ -104,3 +104,36 @@ def test_identify_first_and_by_serial(stub_device):
 def test_identify_none_when_no_board(stub_device):
     h = stub_device(info=dict(stdout_lines=["hackrf_info version: 2024.02.1"]))
     assert h.identify() is None
+
+
+# ---- no-board reporting: stdout is where the reason lives ------------------
+# With no board attached, Linux hackrf_info prints its version lines AND
+# "No HackRF boards found." to STDOUT, then exits 1 with an empty stderr.
+# detect() used to raise on the exit code and discard all of it: problem
+# came back blank and tools_version None. Verified against the real
+# 2023.01.1 Linux binaries.
+_NO_BOARD_STDOUT = [
+    "hackrf_info version: 2023.01.1",
+    "libhackrf version: 2023.01.1 (0.8)",
+    "No HackRF boards found.",
+]
+
+
+def test_detect_no_board_keeps_versions_and_reason(stub_device):
+    h = stub_device(info=dict(stdout_lines=_NO_BOARD_STDOUT, exit_code=1))
+    det = h.detect()
+    assert det["ready"] is False and det["found"] is False
+    assert det["tools_version"] == "2023.01.1"
+    assert det["libhackrf_version"] == "2023.01.1 (0.8)"
+    assert "No HackRF boards found." in det["problem"]
+
+
+def test_run_error_falls_back_to_stdout_tail(stub_device):
+    # a tool that fails with an empty stderr but a reason on stdout must
+    # surface that reason, not "exited N: "
+    import pytest
+    from hackrfpy.exceptions import HackRFDeviceError
+    h = stub_device(clock=dict(stdout_lines=["clock reason on stdout"],
+                               exit_code=3))
+    with pytest.raises(HackRFDeviceError, match="clock reason on stdout"):
+        h.clock("-r")
