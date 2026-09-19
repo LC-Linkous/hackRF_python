@@ -109,8 +109,8 @@ rather than a hand-written one where possible.
   tail). Docs, examples, and test-only changes are exempt. CI cannot attach a
   board, so this is the human half of the quality gate; maintainers may
   re-verify on their own hardware before merge.
-- New public methods need a README entry in the Method Reference and, ideally, a
-  runnable example under `examples/`.
+- New public methods need a README entry in the Method Reference in the main repo README
+  and, ideally, a runnable example under `examples/`.
 
 ## License
 
@@ -123,8 +123,9 @@ CI gates coverage at **85% minimum** (`--cov-fail-under=85`, applied on every
 leg of the CI matrix). Coverage below the gate fails the build; new code
 arrives with the tests that keep it above.
 
-**The CI matrix contains hardware-verified platforms** — currently Windows.
-A platform enters the matrix when it is verified against a real HackRF
+**The CI matrix contains hardware-verified platforms** — currently Windows
+(primary) and Linux (verified 2026-09-19), plus macOS pending verification.
+A platform is included when it is verified against a real HackRF
 board, and is then held to the same standards (the 85% gate and the
 hardware-evidence requirement below).
 
