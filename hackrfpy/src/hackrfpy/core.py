@@ -29,6 +29,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import weakref
 from types import TracebackType
 from typing import Any, Callable, Generator, Literal, Protocol
@@ -201,6 +202,14 @@ else:
 
     def _deadman_attach(proc: subprocess.Popen[Any]) -> Any:
         return None                      # POSIX path is the preexec
+
+
+_BUSY_MARKERS = ("Resource busy", "(-1000)")
+
+
+def _is_busy(text: str) -> bool:
+    # hackrf_open()'s "device still claimed" signature; see busy_retries.
+    return any(m in text for m in _BUSY_MARKERS)
 
 
 class _Stoppable(Protocol):
@@ -385,6 +394,14 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # TX handles are ALWAYS atexit-stopped. RX handles are too by default;
         # set backstop_rx=False for deliberate fire-and-forget receivers.
         self.backstop_rx = True
+        # Device-busy retry: hackrf_open() reports "Resource busy (-1000)"
+        # when the previous child's USB claim has not been released yet --
+        # on Linux the kernel takes a beat after a tool exits, so rapid
+        # back-to-back operations (scan_frequencies, test suites, any
+        # capture-then-sweep script) can lose the race. Bounded retries with
+        # backoff absorb it; set busy_retries=0 to fail immediately.
+        self.busy_retries = 3
+        self.busy_backoff = 0.25         # seconds; doubles per attempt
 
         # ---- parameter readback ----
         # Populated by every validated operation with the ACTUAL values used
@@ -739,6 +756,42 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         if mode == "timed" and duration is None:
             raise HackRFValueError("timed mode requires duration")
 
+        for _busy_attempt in range(max(0, int(self.busy_retries)) + 1):
+            out, err, rc = self._run_once(resolved, mode, duration, text)
+            blob = self._text_of(err) + self._text_of(out)
+            if rc in (0, None) or not _is_busy(blob):
+                break
+            if _busy_attempt < self.busy_retries:
+                delay = self.busy_backoff * (2 ** _busy_attempt)
+                self.warn(f"device busy (previous claim not yet released); "
+                          f"retrying in {delay:.2f}s "
+                          f"({_busy_attempt + 1}/{self.busy_retries})")
+                time.sleep(delay)
+
+        # timed runs end via our SIGINT, so a non-zero rc there is expected.
+        if check and mode != "timed" and rc not in (0, None):
+            errtxt = self._text_of(err)
+            detail = errtxt.strip()
+            if not detail:
+                # some tools report failures on STDOUT with an empty stderr
+                # (Linux hackrf_info prints "No HackRF boards found." there,
+                # exit 1) -- without this fallback the error read
+                # "exited 1: " with the actual reason discarded
+                tail = [ln for ln in self._text_of(out).splitlines()
+                        if ln.strip()]
+                detail = tail[-1].strip() if tail else ""
+            raise HackRFDeviceError(
+                f"{C.TOOLS[argv[0]]} exited {rc}: {detail}")
+        return out, err, rc
+
+    @staticmethod
+    def _text_of(blob: Any) -> str:
+        if isinstance(blob, bytes):
+            return blob.decode(errors="replace")
+        return blob or ""
+
+    def _run_once(self, resolved: list[Any], mode: str,
+                  duration: float | None, text: bool) -> tuple[Any, Any, Any]:
         proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=text,
                                 creationflags=_CREATION_FLAGS)
@@ -759,23 +812,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
             # capture would just start the next segment).
             self._sigint_and_reap(proc)
             raise
-
-        rc = proc.returncode
-        # timed runs end via our SIGINT, so a non-zero rc there is expected.
-        if check and mode != "timed" and rc not in (0, None):
-            errtxt = err.decode(errors="replace") if isinstance(err, bytes) else err
-            detail = errtxt.strip()
-            if not detail:
-                # some tools report failures on STDOUT with an empty stderr
-                # (Linux hackrf_info prints "No HackRF boards found." there,
-                # exit 1) -- without this fallback the error read
-                # "exited 1: " with the actual reason discarded
-                outtxt = out.decode(errors="replace") if isinstance(out, bytes) else (out or "")
-                tail = [ln for ln in outtxt.splitlines() if ln.strip()]
-                detail = tail[-1].strip() if tail else ""
-            raise HackRFDeviceError(
-                f"{C.TOOLS[argv[0]]} exited {rc}: {detail}")
-        return out, err, rc
+        return out, err, proc.returncode
 
     @staticmethod
     def _sigint_and_reap(proc: subprocess.Popen[Any],
@@ -790,6 +827,29 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def _stream(self, resolved: list[str], text: bool = False,
                 read_samples: int = 65536) -> Generator[Any, None, None]:
+        # Device-busy retry, stream flavor: if the child dies with the
+        # hackrf_open busy signature BEFORE anything was yielded, respawn
+        # with backoff (same policy as _run). Once data has flowed, a busy
+        # error can no longer be a stale-claim race and is raised as-is.
+        for _busy_attempt in range(max(0, int(self.busy_retries)) + 1):
+            yielded = False
+            try:
+                for item in self._stream_once(resolved, text, read_samples):
+                    yielded = True
+                    yield item
+                return
+            except HackRFDeviceError as e:
+                if (yielded or not _is_busy(str(e))
+                        or _busy_attempt >= self.busy_retries):
+                    raise
+                delay = self.busy_backoff * (2 ** _busy_attempt)
+                self.warn(f"device busy (previous claim not yet released); "
+                          f"retrying in {delay:.2f}s "
+                          f"({_busy_attempt + 1}/{self.busy_retries})")
+                time.sleep(delay)
+
+    def _stream_once(self, resolved: list[str], text: bool = False,
+                     read_samples: int = 65536) -> Generator[Any, None, None]:
         # Generator twin of _run. Launch, yield stdout as it arrives, clean up
         # on the caller breaking out (GeneratorExit) so we never leave a
         # transmitting/receiving process orphaned.
@@ -848,10 +908,39 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         finally:
             if proc.poll() is None:
                 _interrupt(proc)
+                # brief window with the pipe OPEN: a well-behaved child's
+                # SIGINT handler runs (flush, marker, clean close) and it
+                # exits here
+                try:
+                    proc.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    pass
+            if proc.poll() is None:
+                # Still alive: with the consumer gone, the 64 KB pipe fills
+                # in milliseconds at capture rates and the child is stuck
+                # inside write(); its SIGINT/SIGTERM handlers only set an
+                # exit flag a blocked write never returns to check. On real
+                # hardware the old interrupt->wait->terminate sequence left
+                # hackrf_transfer frozen in write(), HOLDING THE USB CLAIM
+                # until interpreter exit, and every later open failed
+                # "Resource busy". Closing our read end turns the frozen
+                # write into EPIPE/SIGPIPE so the child can die (the kernel
+                # releases the claim on any death) -- then finish the
+                # ladder, which previously stopped at an unreaped
+                # terminate().
+                try:
+                    stdout.close()
+                except OSError:
+                    pass
                 try:
                     proc.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
                     proc.terminate()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
         if not broke_out and proc.returncode not in (0, None):
             t.join(timeout=2.0)   # let the drain finish before reading it
             err = (b"" if not text else "").join(err_tail)

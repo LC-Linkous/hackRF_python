@@ -71,6 +71,23 @@ EXIT_CODE = {exit_code!r}
 EMIT_BYTES = {emit_bytes!r}
 TAIL_ON_INTERRUPT = {tail_on_interrupt!r}
 IGNORE_INTERRUPT = {ignore_interrupt!r}
+BUSY_FAILS = {busy_fails!r}
+STDOUT_FLOOD = {stdout_flood!r}
+
+if BUSY_FAILS:
+    # simulate hackrf_open()'s stale-claim race: fail with the Resource
+    # busy signature the first N invocations, then behave normally. State
+    # lives in a counter file next to the stub so it survives respawns.
+    _cf = __file__ + ".busycount"
+    try:
+        _n = int(open(_cf).read())
+    except (OSError, ValueError):
+        _n = 0
+    if _n < BUSY_FAILS:
+        open(_cf, "w").write(str(_n + 1))
+        sys.stderr.write("hackrf_open() failed: Resource busy (-1000)\\n")
+        sys.stderr.flush()
+        sys.exit(1)
 
 def _on_signal(signum, frame):
     # record WHICH signal arrived, so tests can distinguish the clean
@@ -121,6 +138,16 @@ for line in STDOUT_LINES:
     sys.stdout.write(line + "\\n")
 sys.stdout.flush()
 
+if STDOUT_FLOOD:
+    # keep writing far past pipe capacity so a consumer that stops reading
+    # leaves this child BLOCKED inside write() -- the frozen-writer state
+    # that held the USB claim on real hardware
+    _w = 0
+    while _w < STDOUT_FLOOD:
+        sys.stdout.buffer.write(b"\\x2a" * 4096)
+        _w += 4096
+    sys.stdout.buffer.flush()
+
 if IDLE:
     _idle_until = time.monotonic() + 30.0    # safety ceiling: never leak a
     while time.monotonic() < _idle_until:    # stub child on CI, even one
@@ -136,7 +163,7 @@ sys.exit(EXIT_CODE)
 def _write_stub(tools_dir, name, *, stdout_lines=(), stderr_lines=(),
                 stderr_flood=0, idle=False, exit_code=0, marker=None,
                 emit_bytes=None, tail_on_interrupt=None,
-                ignore_interrupt=False):
+                ignore_interrupt=False, busy_fails=0, stdout_flood=0):
     py_path = os.path.join(tools_dir, name + ".py")
     body = _STUB_TEMPLATE.format(
         marker=marker, stdout_lines=list(stdout_lines),
@@ -144,7 +171,8 @@ def _write_stub(tools_dir, name, *, stdout_lines=(), stderr_lines=(),
         idle=idle, exit_code=exit_code,
         emit_bytes=list(emit_bytes) if emit_bytes else None,
         tail_on_interrupt=tail_on_interrupt,
-        ignore_interrupt=ignore_interrupt)
+        ignore_interrupt=ignore_interrupt, busy_fails=busy_fails,
+        stdout_flood=stdout_flood)
     with open(py_path, "w") as f:
         f.write(body)
 
