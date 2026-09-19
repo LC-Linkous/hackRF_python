@@ -29,11 +29,16 @@ This repository uses official resources and documentation but is **NOT** endorse
 
 ## Platform support
 
-hackrfpy is developed and tested on **Windows**. Running the `hackrf-tools` binaries as subprocesses — rather than binding to `libhackrf` through a C extension — is a deliberate choice so that no compiler or build step is required, which is the main friction point for using a HackRF on Windows.
+hackrfpy is developed and tested on **Windows**, and has also been verified on Debian Linux with real hardware. Running the `hackrf-tools` binaries as subprocesses — rather than binding to `libhackrf` through a C extension — is what makes that portability cheap: there is no compiler or build step on any platform, and each OS runs its own native tools. Process control is handled per-platform (`SIGINT` on POSIX, `CTRL_BREAK` on Windows), with the interrupt, flush, and dead-man paths covered by tests on every OS, no skips.
 
-The library is *written* to be cross-platform: binary discovery goes through `shutil.which`, and process control uses `SIGINT` on POSIX and `CTRL_BREAK` on Windows — with the interrupt, flush, and dead-man paths covered by tests on both platforms (no Windows skips). The `hackrf-tools` binaries are themselves native to Linux and macOS. On Linux, the wrapper has been verified against the **real native binaries** (hackrf-tools 2023.01.1 via `apt install hackrf`, no board attached): tool resolution, environment preflight, command construction, no-board detection, and error reporting all work as documented, and the full non-hardware test suite passes in CI there. One thing that does **not** work — and never will — is pointing `tools_dir` at the *Windows* `.EXE` bundle from a Linux machine; each platform uses its own native tools.
+A platform is called **tested** here only after the full suite (hardware tests included) passes against a real board:
 
-What remains **unverified on Linux and macOS is board-attached operation** — capture, sweep, and transmit against real hardware. Treat that as **experimental** for now. If you run it there with a board, please [open an issue](https://github.com/LC-Linkous/hackRF_python/issues) to report success or trouble — confirmation from real hardware is exactly what's needed to promote those platforms to supported.
+- **Windows** — the primary development platform, verified continuously against real hardware.
+- **Linux** — verified 2026-09-19 on Debian 12 (`hackrf` 2022.09.1, firmware 2024.02.1): full suite, 227/227. Mechanics additionally exercised against tools 2023.01.1 on Ubuntu, so both packaged tools versions are known-good. Setup notes for Debian-family systems are in the [main repository README](https://github.com/LC-Linkous/hackRF_python#linux-setup-debian-family).
+
+**macOS remains experimental**: the mechanics are CI-tested there, but board-attached operation is unverified. If you run it with a board, please [open an issue](https://github.com/LC-Linkous/hackRF_python/issues) — a passing hardware suite is what promotes a platform, and the bar is not a formality: the Linux verification run surfaced and fixed two real process-lifecycle bugs.
+
+One caveat that applies everywhere: `tools_dir` must point at binaries built for the OS you are on — the Windows `.EXE` bundle will never run on Linux, and vice versa.
 
 ## Installation
 
@@ -52,7 +57,7 @@ Python 3.11+ is required.
 **You also need the `hackrf-tools` binaries**, which are *not* a pip dependency — they are installed separately at the OS level. hackrfpy locates them on your `PATH` (or via a configured `tools_dir`).
 
 - **Windows** — *tested.* The tools are published as CI build artifacts under the [Actions tab](https://github.com/greatscottgadgets/hackrf/actions) of the HackRF repo; see the main repository README for the step-by-step.
-- **Linux** — *experimental, see [Platform support](#platform-support).* `sudo apt install hackrf` (or your distribution's equivalent).
+- **Linux** — *tested.* `sudo apt install hackrf` (or your distribution's equivalent).
 - **macOS** — *experimental, see [Platform support](#platform-support).* `brew install hackrf`.
 
 Verify the tools are installed with `hackrf_info`.
@@ -102,7 +107,7 @@ Frequencies accept unit suffixes (`433.92M`, `1.09G`), and most commands take `-
 
 ## Transmitting
 
-Transmit is gated behind an explicit mode switch, because an accidental transmit is the one operation that can damage equipment or break the law:
+Transmit is gated behind an explicit mode switch, because an accidental transmit is the one operation that can damage equipment (or break the law)
 
 ```python
 from hackrfpy import HackRF
