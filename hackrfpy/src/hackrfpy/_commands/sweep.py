@@ -165,10 +165,20 @@ class SweepMixin(HostOps):
         _rows = self.sweep(lo, hi, lna=lna, vga=vga, amp=amp)
         assert _rows is not None          # print_cmd not passed -> real generator
         with StreamCtx(_rows) as gen:
-            rows_by_low = {}
-            last_time = None
+            rows_by_low: dict[int, Any] = {}
             for row in gen:
-                if last_time is not None and row["time"] != last_time and rows_by_low:
+                # A pass is complete when the sweep WRAPS: the same segment
+                # (hz_low) arriving again means a new pass began. The old
+                # boundary was a timestamp change -- but real hackrf_sweep
+                # timestamps each ROW individually, so over a wide span the
+                # "pass" flushed on nearly every row batch, emitting partial
+                # updates where most watched frequencies read None (the test
+                # stubs share one timestamp per pass, which is why stubs
+                # passed while real hardware showed a wall of "--"). Segment
+                # revisit is timestamp-independent and matches the physical
+                # sweep cycle, so every update now covers every watched
+                # frequency the span covers.
+                if row["hz_low"] in rows_by_low:
                     update = {f: _nearest_power(rows_by_low, f) for f in freqs_hz}
                     if on_update is not None:
                         if on_update(update) is False:
@@ -180,7 +190,6 @@ class SweepMixin(HostOps):
                     if duration is not None and _time.time() - t0 >= duration:
                         break
                 rows_by_low[row["hz_low"]] = row
-                last_time = row["time"]
             # flush the final buffered pass (stream ended before its timestamp
             # rolled over) -- unless we were explicitly stopped by on_update
             if rows_by_low and not stopped:

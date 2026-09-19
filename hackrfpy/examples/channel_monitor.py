@@ -21,6 +21,7 @@
 #   Author(s): Lauren Linkous
 ##--------------------------------------------------------------------\
 import argparse
+import os
 import sys
 
 from hackrfpy import HackRF, parse_freq
@@ -58,11 +59,31 @@ def main():
           + ", ".join(l.strip() for l in labels.values())
           + "   (Ctrl-C to stop)")
 
+    # In-place redraw: this is a live METER, so each update overwrites the
+    # previous frame instead of scrolling a log. os.system("") on Windows
+    # switches the classic console into ANSI/VT mode (a documented quirk:
+    # spawning any shell command enables VT processing); it is a no-op
+    # elsewhere. Piped/redirected output falls back to scrolling so logs
+    # stay readable.
+    if os.name == "nt":
+        os.system("")
+    redraw_in_place = sys.stdout.isatty()
+    frame_state = {"drawn": False}
+
     def on_update(update):
         lines = [f"  {labels[f]}  {bar(db)}  "
                  f"{'--' if db is None else f'{db:6.1f} dB'}"
                  for f, db in update.items()]
-        print("\n".join(lines) + "\n")
+        if redraw_in_place:
+            if frame_state["drawn"]:
+                # move the cursor up over the previous frame
+                sys.stdout.write(f"\x1b[{len(lines)}A")
+            # \x1b[2K clears each line so shorter bars leave no residue
+            sys.stdout.write("\n".join("\x1b[2K" + ln for ln in lines) + "\n")
+            sys.stdout.flush()
+            frame_state["drawn"] = True
+        else:
+            print("\n".join(lines) + "\n")
 
     try:
         h.monitor_frequencies(freqs, span_hz=parse_freq(args.span),

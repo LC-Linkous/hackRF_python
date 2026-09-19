@@ -80,3 +80,37 @@ def test_monitor_reads_covering_bin_not_segment_mean(stub_device):
     # 433.5 MHz -> bin idx 3 (the -20 dB carrier). The segment mean would
     # have read -74; the covering bin reads the carrier itself.
     assert abs(out[0][433.5e6] - (-20.0)) < 0.1
+
+
+# ---- pass detection must survive real per-row timestamps -------------------
+# Real hackrf_sweep timestamps each ROW individually; the stub fixtures used
+# one timestamp per pass, which hid a boundary bug: flushing on timestamp
+# change emitted PARTIAL updates several times per pass on real hardware
+# (most watched frequencies None -- seen live as a wall of "--"). The pass
+# boundary is now the sweep WRAP (a segment arriving again), which is
+# timestamp-independent. These rows reproduce the hardware shape: two full
+# passes over two segments, every row with a distinct timestamp.
+_PER_ROW_TS_PASSES = (
+    "2026-09-19, 12:00:00.100000, 88000000, 88500000, 100000.00, 8192, "
+    "-71.0, -70.0, -69.0, -72.0, -71.0\n"
+    "2026-09-19, 12:00:00.230000, 88500000, 89000000, 100000.00, 8192, "
+    "-70.0, -20.0, -72.0, -73.0, -74.0\n"
+    "2026-09-19, 12:00:00.360000, 88000000, 88500000, 100000.00, 8192, "
+    "-71.5, -70.5, -69.5, -72.5, -71.5\n"
+    "2026-09-19, 12:00:00.490000, 88500000, 89000000, 100000.00, 8192, "
+    "-70.5, -21.0, -72.5, -73.5, -74.5\n"
+)
+
+
+def test_updates_are_complete_despite_per_row_timestamps(stub_device):
+    h = stub_device(sweep=dict(stdout_lines=_PER_ROW_TS_PASSES.strip()
+                               .split("\n")))
+    seen = []
+    h.monitor_frequencies([88.6e6], span_hz=0.4e6,
+                          on_update=lambda u: seen.append(u))
+    # two passes -> exactly two updates (wrap flush + final flush), and BOTH
+    # carry a real reading for the watched frequency -- no partial updates
+    assert len(seen) == 2, f"expected 2 complete updates, got {len(seen)}"
+    assert seen[0][88.6e6] == -20.0       # bin 1 of pass-1 second segment
+    assert seen[1][88.6e6] == -21.0       # same bin, pass 2
+    assert all(u[88.6e6] is not None for u in seen)

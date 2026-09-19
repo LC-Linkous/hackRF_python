@@ -258,6 +258,17 @@ release.
   survives at ~72 dB SNR.
 
 ### Fixed
+- `monitor_frequencies()` emitted partial updates several times per sweep
+  pass on real hardware: the pass boundary was a timestamp change, but real
+  `hackrf_sweep` timestamps each row individually (the test stubs shared one
+  timestamp per pass, which hid it), so over a wide span most watched
+  frequencies read `None` in every update -- seen live as a wall of `--`.
+  The boundary is now the sweep wrap (a segment arriving a second time),
+  which is timestamp-independent; every update covers every watched
+  frequency the span covers, pinned by a regression test with per-row
+  timestamps. The `channel_monitor.py` example also now redraws its meter
+  in place (ANSI, Windows VT enabled, scrolling fallback when piped)
+  instead of scroll-printing each frame.
 - Abandoning a live stream could leak a child that held the USB claim for
   the rest of the process: with the consumer gone, the 64 KB stdout pipe
   fills in milliseconds at capture rates and the child blocks inside
