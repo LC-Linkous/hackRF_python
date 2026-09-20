@@ -67,13 +67,24 @@ def main():
     win = np.hanning(nfft).astype(np.float32)
 
     def spectrum(iq):
-        # one FFT frame: window, transform, fftshift to put DC center, log-mag
-        seg = iq[:nfft]
-        if len(seg) < nfft:
-            seg = np.pad(seg, (0, nfft - len(seg)))
-        sp = np.fft.fftshift(np.fft.fft(seg * win))
-        mag = np.abs(sp) / nfft
-        return 20 * np.log10(mag + 1e-9)
+        # Average several FFT frames across the block for a smoother line,
+        # then suppress the center DC / LO-leakage spike that every direct-
+        # conversion SDR shows at 0 Hz (the bright line dead-center). We
+        # replace the few central bins with a neighbor so a real signal
+        # isn't hidden under the artifact.
+        nframes = max(1, len(iq) // nfft)
+        acc = np.zeros(nfft, dtype=np.float64)
+        for k in range(nframes):
+            seg = iq[k * nfft:(k + 1) * nfft]
+            if len(seg) < nfft:
+                seg = np.pad(seg, (0, nfft - len(seg)))
+            sp = np.fft.fftshift(np.fft.fft(seg * win))
+            acc += (np.abs(sp) / nfft) ** 2
+        acc /= nframes
+        db = 10 * np.log10(acc + 1e-12)
+        c = nfft // 2
+        db[c - 2:c + 3] = db[c + 3]     # flatten the DC spike
+        return db
 
     fig, ax = plt.subplots(figsize=(11, 6))
     try:
@@ -94,9 +105,13 @@ def main():
 
     try:
         with h.open_receiver(freq, rate) as rx:
-            # one block per FFT frame; read exactly nfft samples each time
+            # Read a LARGE block per iteration so the pipe drains fast enough
+            # to keep hackrf_transfer streaming (reading only nfft=1024
+            # samples per loop, with a redraw each time, stalls the device at
+            # 10 Msps). Each big block becomes one averaged waterfall row.
+            block_samples = 262144
             for _ in range(10_000_000):       # effectively "until stopped"
-                iq = rx.read(nfft)
+                iq = rx.read(block_samples)
                 if len(iq) < nfft:
                     break
                 history.append(spectrum(iq))

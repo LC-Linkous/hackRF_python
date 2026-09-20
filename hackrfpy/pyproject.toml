@@ -46,6 +46,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "mypy",
+    "sigmf>=1.2",     # official validator: spec compliance is tested, not trusted
 ]
 
 [tool.pytest.ini_options]

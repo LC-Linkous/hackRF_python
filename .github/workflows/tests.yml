@@ -26,6 +26,13 @@ jobs:
       matrix:
         # windows-latest is first because it is the platform this library
         # targets; the cross-platform lifecycle stubs must pass there.
+        # ubuntu re-entered the matrix 2026-09-19: Linux was verified
+        # against a real board (Debian 12, full suite incl. hardware tests,
+        # 227/227) and is held to the same standards as Windows. This also
+        # puts the Linux pdeathsig dead-man path back under regression
+        # testing. The verification itself surfaced and fixed two lifecycle
+        # bugs (frozen-writer USB-claim leak; open-retry race) -- see the
+        # CHANGELOG.
         os: [windows-latest, ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
 
@@ -42,12 +49,12 @@ jobs:
         run: uv sync
 
       - name: Run test suite (hardware tests deselected)
-        run: uv run pytest -m "not hardware" --cov=hackrfpy --cov-report=xml --cov-report=term-missing
+        run: uv run pytest -m "not hardware" --cov=hackrfpy --cov-report=xml --cov-report=term-missing --cov-fail-under=85
 
       - name: Upload coverage to Codecov
         # Optional: only runs once linked at https://codecov.io. Tokenless for
         # public repos. Safe to leave in before linking - it just no-ops/soft-fails.
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        if: matrix.os == 'windows-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
         with:
           files: hackrfpy/coverage.xml

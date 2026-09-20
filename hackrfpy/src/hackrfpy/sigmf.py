@@ -26,6 +26,11 @@ def write_sigmf_meta(data_path: str, freq: float, sample_rate: float, *,
                      lna: int | None = None, vga: int | None = None,
                      amp: bool | None = None, datatype: str = "ci8",
                      extra: dict[str, Any] | None = None) -> str:
+    """Write a SigMF .sigmf-meta sidecar for an IQ file.
+
+    Records datatype (ci8 by default), sample rate, center frequency,
+    gains under the declared hackrf extension, and a capture timestamp.
+    """
     # Sidecar path: foo.iq -> foo.sigmf-meta
     base, _ = os.path.splitext(data_path)
     meta_path = base + ".sigmf-meta"

@@ -22,6 +22,7 @@ from .._host import HostOps
 class InfoMixin(HostOps):
     def info(self, raw: bool = False,
              print_cmd: bool = False) -> dict[str, Any] | str | None:
+        """Run hackrf_info; return a parsed dict (or raw text with raw=True)."""
         # Returns a parsed dict by default, or the raw text if raw=True.
         if print_cmd:
             self._run(["info"], mode="blocking", print_cmd=True)
@@ -33,10 +34,16 @@ class InfoMixin(HostOps):
         return self.parse_info(out)
 
     def get_info(self) -> dict[str, Any] | str | None:
+        """Alias of info()."""
         # alias
         return self.info()
 
     def detect(self) -> dict[str, Any]:
+        """Detect and identify attached boards (the serial-port-scan analog).
+
+        Returns a dict with ready (bool), boards (list of per-board dicts),
+        tools_version, and problem (actionable message when not ready).
+        """
         # Hardware autodetection + identification, the HackRF analog of a
         # serial-port scan. The HackRF is NOT a serial device -- there are no
         # COM ports to walk -- so "detection" means: run hackrf_info, confirm
@@ -62,7 +69,13 @@ class InfoMixin(HostOps):
                   "tools_version": None, "libhackrf_version": None,
                   "multiple": False, "warnings": [], "problem": None}
         try:
-            out, _, _ = self._run(["info"], mode="blocking", text=True)
+            # check=False: with no board attached, Linux hackrf_info exits 1
+            # AFTER printing its version lines and the reason to STDOUT
+            # (stderr empty). Raising on the exit code threw all of that
+            # away -- tools_version came back None and problem was blank.
+            # Parse whatever it printed; the exit code is not the signal here.
+            out, _, _ = self._run(["info"], mode="blocking", text=True,
+                                  check=False)
         except HackRFDeviceError as e:
             # hackrf_info couldn't run at all (binary missing). Surface it as a
             # problem rather than raising, so detect() is always safe to call.
@@ -104,10 +117,16 @@ class InfoMixin(HostOps):
             result["problem"] = ("a USB device was enumerated but did not "
                                  "identify as a HackRF")
         elif not result["found"]:
-            result["problem"] = "no HackRF board detected (check USB / drivers)"
+            # prefer the tool's own words when it stated a reason
+            stated = next((ln.strip() for ln in out.splitlines()
+                           if ln.strip().lower().startswith("no hackrf")), None)
+            result["problem"] = (f"{stated} (check USB / drivers)" if stated
+                                 else "no HackRF board detected "
+                                      "(check USB / drivers)")
         return result
 
     def identify(self, serial: str | None = None) -> dict[str, Any] | None:
+        """Return one board's identity dict (by serial, or the first found)."""
         # Return the identity of a single board: the one matching `serial`, or
         # the first detected board if serial is None. Returns the board dict
         # from detect()["boards"], or None if not found. Convenience for "what
@@ -124,6 +143,7 @@ class InfoMixin(HostOps):
 
     @staticmethod
     def parse_info(text: str) -> dict[str, Any]:
+        """Parse hackrf_info text into {library: ..., boards: [...]}."""
         # hackrf_info prints "Key: value" lines: a version preamble, then one
         # block per board. We keep the preamble under "library" and each board
         # under "boards". A board starts at "Found HackRF" or, for outputs that

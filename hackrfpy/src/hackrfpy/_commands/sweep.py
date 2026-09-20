@@ -29,6 +29,13 @@ class SweepMixin(HostOps):
               num_sweeps: int | None = None,
               print_cmd: bool = False
               ) -> Generator[dict[str, Any], None, None] | None:
+        """Stream a spectrum sweep as parsed dict rows (generator).
+
+        Rows carry date, time, hz_low, hz_high, bin_width, num_samples and db
+        (a list per bin). Segments arrive OUT of frequency order. Edges snap
+        outward to integer MHz (floor low, ceil high) so the swept range always
+        contains the requested band.
+        """
         # GENERATOR yielding parsed rows (dicts). Validate the band edges with
         # the same hard-range logic, snap gains. hackrf_sweep takes the range
         # in MHz as f_min:f_max.
@@ -46,14 +53,19 @@ class SweepMixin(HostOps):
         self.print_message(f"[*] mode: {self.mode}")
 
         lo = int(f_min_hz // 1_000_000)
-        hi = int(f_max_hz // 1_000_000)
+        hi = -int(-f_max_hz // 1_000_000)      # ceil: never truncate the top
         # hackrf_sweep takes integer MHz edges, so sub-MHz precision is lost.
-        # Warn rather than silently shift the band the user asked for.
+        # Snap OUTWARD (floor the low edge, ceil the high edge) so the swept
+        # range always CONTAINS the requested band -- flooring both edges
+        # silently dropped everything above the last whole MHz (e.g.
+        # 433.9:434.1 swept 433:434 and never covered 434.0-434.1). Warn so
+        # the user knows the edges moved.
         if f_min_hz % 1_000_000 or f_max_hz % 1_000_000:
             self.warn(
-                f"sweep edges snapped to MHz: "
+                f"sweep edges snapped to MHz (outward): "
                 f"{f_min_hz/1e6:g}:{f_max_hz/1e6:g} -> {lo}:{hi} MHz "
-                f"(hackrf_sweep takes integer MHz)")
+                f"(hackrf_sweep takes integer MHz; requested band fully "
+                f"covered)")
         argv = ["sweep", "-f", f"{lo}:{hi}", "-l", lna, "-g", vga,
                 "-a", 1 if amp else 0]
         if bin_width is not None:
@@ -91,6 +103,7 @@ class SweepMixin(HostOps):
 
     def sweep_collect(self, f_min_hz: float, f_max_hz: float,
                       num_sweeps: int = 1, **k: Any) -> list[dict[str, Any]]:
+        """Run num_sweeps full passes and return the parsed rows as a list."""
         # Convenience: collect a bounded number of sweeps into a list.
         k.pop("num_sweeps", None)
         rows = self.sweep(f_min_hz, f_max_hz, num_sweeps=num_sweeps, **k)
@@ -104,6 +117,12 @@ class SweepMixin(HostOps):
                             on_update: Callable[..., Any] | None = None,
                             lna: int = 16, vga: int = 20,
                             amp: bool = False) -> Any:
+        """Track power over time at several frequencies via one sweep.
+
+        Yields (or passes to on_update) {freq: dB} per sweep pass; the reading
+        is the sweep bin covering the frequency (max of that bin +/-1), not a
+        segment average. Power only -- use scan_frequencies for IQ.
+        """
         # Watch POWER over time at several frequencies, backed by hackrf_sweep's
         # fast internal hardware retuning. This is DELIBERATELY a different
         # method from scan_frequencies():
@@ -124,13 +143,20 @@ class SweepMixin(HostOps):
         t0 = _time.time()
 
         def _nearest_power(rows_by_low: dict[int, Any], f: float) -> Any:
-            # find the sweep segment whose [hz_low, hz_high) covers f, return
-            # the mean dB of that segment's bins (a simple power proxy)
+            # find the sweep segment whose [hz_low, hz_high) covers f and
+            # return the dB of the BIN covering f (max of that bin +/-1 for
+            # tuning slop). Averaging the whole segment diluted a narrowband
+            # carrier toward the noise floor: in a 5 MHz segment a strong
+            # signal occupying one bin barely moved the mean.
             for low in sorted(rows_by_low):
                 r = rows_by_low[low]
                 if r["hz_low"] <= f < r["hz_high"]:
                     db = r["db"]
-                    return sum(db) / len(db) if db else float("-inf")
+                    if not db:
+                        return float("-inf")
+                    idx = int((f - r["hz_low"]) / r["bin_width"])
+                    idx = max(0, min(idx, len(db) - 1))
+                    return max(db[max(0, idx - 1):idx + 2])
             return None
 
         from .._stream_ctx import StreamCtx
@@ -139,10 +165,20 @@ class SweepMixin(HostOps):
         _rows = self.sweep(lo, hi, lna=lna, vga=vga, amp=amp)
         assert _rows is not None          # print_cmd not passed -> real generator
         with StreamCtx(_rows) as gen:
-            rows_by_low = {}
-            last_time = None
+            rows_by_low: dict[int, Any] = {}
             for row in gen:
-                if last_time is not None and row["time"] != last_time and rows_by_low:
+                # A pass is complete when the sweep WRAPS: the same segment
+                # (hz_low) arriving again means a new pass began. The old
+                # boundary was a timestamp change -- but real hackrf_sweep
+                # timestamps each ROW individually, so over a wide span the
+                # "pass" flushed on nearly every row batch, emitting partial
+                # updates where most watched frequencies read None (the test
+                # stubs share one timestamp per pass, which is why stubs
+                # passed while real hardware showed a wall of "--"). Segment
+                # revisit is timestamp-independent and matches the physical
+                # sweep cycle, so every update now covers every watched
+                # frequency the span covers.
+                if row["hz_low"] in rows_by_low:
                     update = {f: _nearest_power(rows_by_low, f) for f in freqs_hz}
                     if on_update is not None:
                         if on_update(update) is False:
@@ -154,7 +190,6 @@ class SweepMixin(HostOps):
                     if duration is not None and _time.time() - t0 >= duration:
                         break
                 rows_by_low[row["hz_low"]] = row
-                last_time = row["time"]
             # flush the final buffered pass (stream ended before its timestamp
             # rolled over) -- unless we were explicitly stopped by on_update
             if rows_by_low and not stopped:
@@ -171,6 +206,11 @@ class SweepMixin(HostOps):
                       vga: int = 20, amp: bool = False, one_shot: bool = False,
                       num_sweeps: int | None = None,
                       print_cmd: bool = False) -> str | None:
+        """Run hackrf_sweep writing to a file (CSV, or -B/-I binary).
+
+        binary=True (-B) and inverse_fft=True (-I) produce unparsed binary
+        passthrough; the library parses only the CSV text format.
+        """
         # Write sweep output straight to a file instead of yielding parsed
         # rows. This is the home for hackrf_sweep's binary-output flags, which
         # don't fit the text-CSV generator:
@@ -189,7 +229,7 @@ class SweepMixin(HostOps):
         lna = self._snap_gain("lna_gain", lna, C.LNA_GAIN)
         vga = self._snap_gain("vga_gain", vga, C.VGA_GAIN)
         lo = int(f_min_hz // 1_000_000)
-        hi = int(f_max_hz // 1_000_000)
+        hi = -int(-f_max_hz // 1_000_000)      # ceil: never truncate the top
         argv = ["sweep", "-f", f"{lo}:{hi}", "-l", lna, "-g", vga,
                 "-a", 1 if amp else 0, "-r", out]
         if bin_width is not None:
@@ -206,6 +246,7 @@ class SweepMixin(HostOps):
         return None if print_cmd else out
 
     def sweep_stream(self, f_min_hz: float, f_max_hz: float, **k: Any) -> Any:
+        """Return a StreamCtx over parsed sweep rows (reaped on context exit)."""
         # Context manager around the sweep generator so the underlying
         # hackrf_sweep is ALWAYS reaped on exit -- including KeyboardInterrupt
         # out of a live consumer loop (e.g. a waterfall). Without this, a
@@ -223,6 +264,7 @@ class SweepMixin(HostOps):
 
     @staticmethod
     def parse_sweep_line(line: str) -> dict[str, Any] | None:
+        """Parse one hackrf_sweep CSV line into a row dict, or None if invalid."""
         # Returns {date,time,hz_low,hz_high,bin_width,num_samples,db:[...]} or
         # None for blank/garbled lines.
         line = line.strip()

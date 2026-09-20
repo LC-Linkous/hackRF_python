@@ -75,3 +75,40 @@ def test_user_toml_overrides_builtin(tmp_path, monkeypatch):
     pre = P.load_presets()
     assert pre["ads-b"]["center"] == 1_100_000_000   # user wins
     assert pre["ads-b"]["desc"] == "overridden"
+
+
+# ---- package version attribute ---------------------------------------------
+def test_dunder_version_present():
+    import hackrfpy
+    v = hackrfpy.__version__
+    assert isinstance(v, str) and v
+    try:
+        from importlib.metadata import version
+        assert v == version("hackrfpy")
+    except Exception:
+        assert v.startswith("0.0.0")          # uninstalled checkout fallback
+
+
+# ---- official SigMF validator (plan:#8) ------------------------------------
+# The writer looked spec-correct by inspection; this makes GNU Radio /
+# IQEngine interop a TESTED property instead of a trusted one. Skips only
+# where the dev group is not installed.
+def test_sidecar_passes_official_sigmf_validator(tmp_path):
+    sigmffile = pytest.importorskip("sigmf.sigmffile",
+                                    reason="sigmf dev dependency not installed")
+    import numpy as np
+    iq_path = str(tmp_path / "capture.iq")
+    np.zeros(4096, dtype=np.int8).tofile(iq_path)
+    write_sigmf_meta(iq_path, 98.1e6, 2e6, lna=32, vga=20, amp=False,
+                     datatype="ci8")
+
+    f = sigmffile.fromfile(str(tmp_path / "capture.sigmf-meta"))
+    f.set_data_file(iq_path)
+    f.validate()                          # raises on any spec violation
+    assert f.get_global_field("core:datatype") == "ci8"
+    assert f.get_global_field("core:sample_rate") == 2e6
+    assert f.sample_count == 2048         # 4096 int8 bytes = 2048 ci8 pairs
+    # the hackrf extension must be DECLARED, not just used (strict validators
+    # reject undeclared namespaces; this regressed once pre-1.0)
+    exts = f.get_global_field("core:extensions")
+    assert any(e.get("name") == "hackrf" for e in exts)

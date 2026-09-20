@@ -156,9 +156,17 @@ class HackRFCLI:
         sp.add_argument("--preset", help="apply a band preset for freq/rate")
 
         # tx
-        sp = sub.add_parser("tx", help="transmit IQ from a file (TX mode only)")
+        sp = sub.add_parser("tx", help="transmit IQ from a file, or a CW "
+                                       "test tone with --cw (TX mode only)")
         _add_common_rf(sp)
-        sp.add_argument("source", help="int8 I/Q file to transmit")
+        sp.add_argument("source", nargs="?", default=None,
+                        help="int8 I/Q file to transmit (omit with --cw)")
+        sp.add_argument("--cw", action="store_true",
+                        help="transmit a constant-wave test tone instead of "
+                             "a file; requires -d/--duration")
+        sp.add_argument("--cw-amplitude", dest="cw_amplitude", type=int,
+                        default=64, help="CW DAC amplitude 0-127 (default 64, "
+                                         "deliberately below full scale)")
         sp.add_argument("-x", "--txvga", type=int, default=20)
         sp.add_argument("-a", "--amp", action="store_true")
         sp.add_argument("--bias-tee", dest="bias_tee", action="store_true")
@@ -179,8 +187,48 @@ class HackRFCLI:
         sp.add_argument("-a", "--amp", action="store_true")
         sp.add_argument("-1", "--one-shot", dest="one_shot", action="store_true")
         sp.add_argument("-N", "--num-sweeps", dest="num_sweeps", type=int)
+        sp.add_argument("-o", "--out", default=None,
+                        help="write via hackrf_sweep -r FILE instead of "
+                             "parsing to stdout (required for -B / -I)")
+        sp.add_argument("-B", "--binary", action="store_true",
+                        help="raw binary bins (unparsed passthrough)")
+        sp.add_argument("-I", "--inverse-fft", dest="inverse_fft",
+                        action="store_true",
+                        help="inverse FFT binary output (unparsed passthrough)")
         sp.add_argument("--force", action="store_true")
         sp.add_argument("--print-cmd", dest="print_cmd", action="store_true")
+        sp.add_argument("-v", "--verbose", action="store_true")
+        sp.add_argument("--serial", help="select a board by serial number")
+
+        # monitor
+        sp = sub.add_parser("monitor", help="power over time on several "
+                                            "frequencies via one sweep")
+        sp.add_argument("freqs", nargs="+", type=parse_freq,
+                        help="frequencies to watch (parse_freq notation)")
+        sp.add_argument("--span", type=parse_freq, default=2e6,
+                        help="sweep margin around watched freqs (default 2M)")
+        sp.add_argument("-d", "--duration", type=float, default=None,
+                        help="seconds to run (default: until Ctrl-C)")
+        sp.add_argument("-l", "--lna", type=int, default=16)
+        sp.add_argument("-g", "--vga", type=int, default=20)
+        sp.add_argument("-a", "--amp", action="store_true")
+        sp.add_argument("--force", action="store_true")
+        sp.add_argument("-v", "--verbose", action="store_true")
+        sp.add_argument("--serial", help="select a board by serial number")
+
+        # scan
+        sp = sub.add_parser("scan", help="capture IQ at several frequencies; "
+                                         "print power per frequency")
+        sp.add_argument("freqs", nargs="+", type=parse_freq,
+                        help="frequencies to visit (parse_freq notation)")
+        sp.add_argument("-s", "--sample-rate", dest="sample_rate",
+                        type=parse_freq, default=8e6)
+        sp.add_argument("-n", "--num-samples", dest="num_samples", type=int,
+                        default=262144)
+        sp.add_argument("-l", "--lna", type=int, default=16)
+        sp.add_argument("-g", "--vga", type=int, default=20)
+        sp.add_argument("-a", "--amp", action="store_true")
+        sp.add_argument("--force", action="store_true")
         sp.add_argument("-v", "--verbose", action="store_true")
         sp.add_argument("--serial", help="select a board by serial number")
 
@@ -258,6 +306,25 @@ class HackRFCLI:
                       print_cmd=args.print_cmd)
 
         elif name == "tx":
+            if args.cw and args.source:
+                raise HackRFValueError("--cw and a source file are mutually "
+                                       "exclusive")
+            if args.cw:
+                if not args.duration and not args.print_cmd:
+                    raise HackRFValueError(
+                        "tx --cw requires -d/--duration: a CW carrier with "
+                        "no time bound is exactly the orphan-transmitter "
+                        "risk the library exists to prevent")
+                h.transmit_cw(args.frequency, args.sample_rate,
+                              amplitude=args.cw_amplitude, txvga=args.txvga,
+                              amp=args.amp, bias_tee=args.bias_tee,
+                              baseband_bw=args.baseband_bw,
+                              duration=args.duration,
+                              max_duration=args.max_duration,
+                              print_cmd=args.print_cmd)
+                return
+            if not args.source:
+                raise HackRFValueError("tx needs a source file (or --cw)")
             h.transmit(args.frequency, args.sample_rate, args.source,
                        txvga=args.txvga, amp=args.amp, bias_tee=args.bias_tee,
                        baseband_bw=args.baseband_bw, repeat=args.repeat,
@@ -266,6 +333,20 @@ class HackRFCLI:
                        print_cmd=args.print_cmd)
 
         elif name == "sweep":
+            if (args.binary or args.inverse_fft) and not args.out:
+                raise HackRFValueError(
+                    "-B / -I produce unparsed binary that cannot go to the "
+                    "CSV stdout path; pass -o/--out FILE")
+            if args.out:
+                h.sweep_to_file(args.f_min, args.f_max, args.out,
+                                binary=args.binary,
+                                inverse_fft=args.inverse_fft,
+                                bin_width=args.bin_width, lna=args.lna,
+                                vga=args.vga, amp=args.amp,
+                                one_shot=args.one_shot,
+                                num_sweeps=args.num_sweeps,
+                                print_cmd=args.print_cmd)
+                return
             gen = h.sweep(args.f_min, args.f_max, bin_width=args.bin_width,
                           lna=args.lna, vga=args.vga, amp=args.amp,
                           one_shot=args.one_shot, num_sweeps=args.num_sweeps,
@@ -280,6 +361,27 @@ class HackRFCLI:
                          str(row["hz_low"]), str(row["hz_high"]),
                          f"{row['bin_width']:.2f}", str(row["num_samples"])]
                         + [f"{d:.2f}" for d in row["db"]]))
+
+        elif name == "monitor":
+            def _print_update(update: dict[float, Any]) -> None:
+                for f, db in sorted(update.items()):
+                    val = "--" if db is None else f"{db:.1f}"
+                    print(f"{f/1e6:.3f} MHz  {val} dB", flush=True)
+            h.monitor_frequencies(list(args.freqs), span_hz=args.span,
+                                  duration=args.duration,
+                                  on_update=_print_update, lna=args.lna,
+                                  vga=args.vga, amp=args.amp)
+
+        elif name == "scan":
+            results = h.scan_frequencies(list(args.freqs), args.sample_rate,
+                                         args.num_samples, lna=args.lna,
+                                         vga=args.vga, amp=args.amp)
+            for f in args.freqs:
+                iq = (results or {}).get(f)
+                if iq is None or not len(iq):
+                    print(f"{f/1e6:.3f} MHz  --")
+                else:
+                    print(f"{f/1e6:.3f} MHz  {h.power_dbfs(iq):.1f} dBFS")
 
 
 def main() -> None:

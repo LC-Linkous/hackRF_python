@@ -11,7 +11,7 @@
 
 ## An UNOFFICIAL Python CLI + scripting wrapper for the HackRF One
 
-A non-GUI Python wrapper and command-line tool for the [HackRF One](https://greatscottgadgets.com/hackrf/one/) software-defined radio.
+A non-GUI Python wrapper and command-line tool for the [HackRF One](https://greatscottgadgets.com/hackrf/one/) software-defined radio. Designed to work on Windows, also works on other OS.
 
 This repository uses official resources and documentation but is **NOT** endorsed by Great Scott Gadgets or the HackRF project. See the [references](#references) section for further reading. See the [official HackRF documentation](https://hackrf.readthedocs.io/) and the [GitHub project](https://github.com/greatscottgadgets/hackrf) for official documentation of device behavior.
 
@@ -29,6 +29,7 @@ The primary GitHub: [https://github.com/LC-Linkous/hackRF_python](https://github
 * [Library Usage](#library-usage)
     * [Local Install Using UV](#local-install-using-uv)
     * [Installing hackrf-tools](#installing-hackrf-tools)
+    * [Linux Setup (Debian)](#linux-setup-debian)
 * [Requirements](#requirements)
 * [Structure](#structure)
 * [The Operating Envelope](#the-operating-envelope)
@@ -71,7 +72,7 @@ The primary GitHub: [https://github.com/LC-Linkous/hackRF_python](https://github
 
 ## The HackRF One Device
 
-The [HackRF One](https://greatscottgadgets.com/hackrf/one/) is a wide-band, half-duplex software-defined radio from Great Scott Gadgets. It tunes from 1 MHz to 6 GHz and samples at up to 20 Msps (2 Msps floor). It is **half-duplex**  (it receives or transmits, but never both at once) and **8-bit**: samples are quantized to signed 8-bit I and Q, interleaved. That interleaved int8 I/Q is the native format this library reads and writes, on both the receive and transmit paths.
+The [HackRF One](https://greatscottgadgets.com/hackrf/one/) is a wide-band, half-duplex software-defined radio from Great Scott Gadgets. It tunes from 1 MHz to 6 GHz and samples at up to 20 Msps (2 Msps floor). It is **half-duplex** (it receives or transmits, but never both at once) and **8-bit**: samples are quantized to signed 8-bit I and Q, interleaved. That interleaved int8 I/Q is the native format this library reads and writes, on both the receive and transmit paths.
 
 Because there is one radio and it can't do both directions at once, the library carries an explicit operating mode (RX or TX), with a deliberate gate before transmit — see [Operating Modes and the TX Gate](#operating-modes-and-the-tx-gate).
 
@@ -87,7 +88,7 @@ Wrapping the binaries instead of binding the C library shapes everything downstr
 * **No compiled dependencies.** This is the largest change from previous versions of this tool and other Python libraries. There is no `libhackrf` to link, no build step, and no wheel that has to match your platform's C toolchain. The tradeoff is that the binaries for the SDR are a *system* dependency you install separately, but it is what lets this library run on Windows without managing multiple installs.
 * **The library manages the hackrf-tools child processes.** It handles draining stdout/stderr without deadlocking, stopping hackrf_transfer cleanly so recordings aren't truncated mid-sample-pair, reaping children when a consumer exits early, and shutting down the transmitter if the script dies. Tests cover these paths.
 * **Everything funnels through one method.** Every binary invocation goes through `_run(argv, mode=...)`. The `mode` selects the lifecycle: `blocking` (run to completion), `timed` (run N seconds then stop), `handle` (return a controllable process), or `stream` (yield output as it arrives). Centralizing this is what makes the lifecycle testable.
-* **The library yields `complex64`; it does not interpret samples.** Decoding interleaved int8 to normalized `complex64` is the boundary. Filtering, demodulation, FFTs, waterfalls — deliberately *not* here. See [project_summary.md](project_summary.md) for the split between this project (transport + control) and the planned signal-processing project.
+* **The library yields `complex64`; it does not interpret samples.** Decoding interleaved int8 to normalized `complex64` is the boundary. Filtering, demodulation, FFTs, waterfalls — deliberately *not* in the library API; this project is transport + control, and signal processing belongs downstream. The `examples/` directory may *demonstrate* downstream processing (`fm_demod_to_wav.py` turns a capture into audible audio) precisely to show where the boundary sits.
 
 
 ## Library Usage
@@ -121,7 +122,7 @@ To build a distributable wheel:
 ```bash
 # produces dist/ in the package directory
 uv build
-pip install dist/hackrfpy-0.1.0-py3-none-any.whl
+pip install dist/hackrfpy-*-py3-none-any.whl   # match the version uv build produced
 ```
 
 You can use another package manager if you prefer; the package metadata is all in `pyproject.toml`. Manual install equivalents:
@@ -134,11 +135,11 @@ pip install -e .                   # editable, library only
 
 ### Installing hackrf-tools
 
-This library requires the  `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level. This package cannot install them.
+This library requires the `hackrf-tools` binaries on the host. They are **not** a pip dependency; they are installed at the OS level. This package cannot install them.
 
 Only the command line tools are required. (`hackrf_info`, `hackrf_transfer`, `hackrf_sweep`, and the device-management utilities). 
 
-* **Linux:** `sudo apt install hackrf` (Debian/Ubuntu) or your distribution's equivalent. This installs the tools and the udev rules; you may need to be in the `plugdev` group for non-root USB access.
+* **Linux:** `sudo apt install hackrf` (Debian/Ubuntu) or your distribution's equivalent — full setup notes in [Linux Setup (Debian)](#linux-setup-debian) below.
 * **macOS:** `brew install hackrf`.
 * **Windows:** Great Scott Gadgets publishes the tools as CI build artifacts for some workflow runs. You do **not** need GNU Radio, SoapySDR, or a full SDR distribution. If you have radioconda installed, then you have the binaries, and GNU Radio and a full conda environment you don't need for this library. Download the prebuilt `hackrf-tools` from the [Great Scott Gadgets github](https://github.com/greatscottgadgets/hackrf) (or via a package manager that provides them). 
 
@@ -154,6 +155,40 @@ hackrf_info
 ```
 
 If that prints a board (or at least runs), the binaries are reachable. If it is not on your `PATH`, use `tools_dir` (Python) or `[tools].dir` in config.
+
+### Linux Setup (Debian)
+
+**Linux is verified with real hardware** (2026-09-19: Debian 12 bookworm, kernel 6.12.95, `hackrf` 2022.09.1, firmware 2024.02.1 — full test suite including all hardware tests, 227/227) and sits in the CI matrix under the same standards as Windows (see the platform policy in `CONTRIBUTING.md`). Mechanics were additionally verified on Ubuntu 24.04 with `hackrf` 2023.01.1, so both tools versions are known-good. macOS remains experimental pending its own board run.
+
+Unlike Windows, no artifact download is needed: `sudo apt install hackrf` installs all the `hackrf_*` binaries onto `PATH` (no compiling, no `tools_dir` configuration) **and** the udev rules for USB access. `hackrf_info` then has two healthy outcomes — with no board: version lines, then `No HackRF boards found.`, exit code 1 (the library reports this verbatim from `detect()`); with a board: `Found HackRF` with serial, board ID, and firmware.
+
+**USB permissions — no sudo, no exceptions.** The package ships `/lib/udev/rules.d/60-libhackrf0.rules`, which grants the HackRF One (USB `1d50:6089`) to the **`plugdev`** group. Never run the tools or the library with `sudo`; join the group instead:
+
+```bash
+sudo usermod -aG plugdev "$USER"
+# log out and back in (or `newgrp plugdev`), then REPLUG the board
+hackrf_info          # must work without sudo before going further
+```
+
+The Python environment is identical to Windows (`uv sync`, then run everything through `uv run`). Without a board, the hardware-marked tests self-skip while the `needs_tools` tests run, because the binaries are on `PATH`; with a board attached, everything runs. The verification sequence — the same run that verified Linux on 2026-09-19 — is:
+
+```bash
+uv run pytest -q                          # full suite, hardware included
+uv run hrf detect                         # library sees the board
+uv run hrf monitor 98.1M -d 10            # live sanity: FM power moves
+uv run python examples/collect_sample_data.py   # validated captures
+```
+
+If you reproduce a fully green suite on another distribution or tools version, please report it (distribution, kernel, `hackrf` package version, firmware version) — each new combination widens the known-good record, and the original verification run surfaced two real process-lifecycle bugs, so running this sequence is not a formality.
+
+| Symptom | Cause / fix |
+|---|---|
+| `hackrf_info: command not found` | `sudo apt install hackrf`; new shell |
+| `No HackRF boards found.` | Board unplugged, bad cable/port, or DFU mode |
+| Permission denied without sudo | `plugdev` group + replug (above) |
+| Works as root only | Same — fix the group, don't keep sudo |
+| Old tools version in apt | Fine for this library (verified with 2022.09.1 and 2023.01.1); build from source only if you need newer device features |
+| Pointing `tools_dir` at the Windows `.EXE` bundle | Never works on Linux — each platform uses its own native tools |
 
 
 ## Requirements
@@ -180,7 +215,6 @@ The public API is `from hackrfpy import HackRF`. Per-command methods live in mix
 ```
 hackRF_python/                  repo root (this README, CITATION, etc.)
 ├── README.md
-├── project_summary.md          this-project vs next-project split
 ├── hackrfpy/                   the installable package + its dev tree
 │   ├── pyproject.toml
 │   ├── README.md               package README (dev/install quickref)
@@ -212,7 +246,10 @@ hackRF_python/                  repo root (this README, CITATION, etc.)
 │   │   ├── persistent_capture.py    multi-segment capture, one process
 │   │   ├── benchmark.py             measure decode/throughput/latency
 │   │   ├── calibrate.py             calibration workflow (Levels 2-3)
+│   │   ├── channel_monitor.py       multi-frequency power meter (one sweep)
+│   │   ├── tx_test_tone.py          the one transmitting example (gated, bounded)
 │   │   ├── collect_sample_data.py   real sample-data collector (read-only)
+│   │   ├── fm_demod_to_wav.py       capture -> audible WAV (downstream demo)
 │   │   └── sample_data/             committed real recordings + SigMF + README
 │   └── tests/
 │       ├── conftest.py           cross-platform stub-binary factory
@@ -269,11 +306,11 @@ uv run pytest -m hardware
 uv run pytest --cov=hackrfpy --cov-report=term-missing
 ```
 
-> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. **Run the scripts the same way** (such as `uv run python tests/collect_real_data.py ...`), not wih the bare `python ...`. The bare `python` call might work with some setups, but it is an easy source of error if uv creates a second virtual environment on a lower level. 
+> **Note:** this is a configured uv project, so `uv run pytest` uses the synced venv and editable install. **Run the scripts the same way** (such as `uv run python tests/collect_real_data.py ...`), not with the bare `python ...`. The bare `python` call might work with some setups, but it is an easy source of error if uv creates a second virtual environment on a lower level. 
 
 The suite is split into hardware-free tests and tests marked `@pytest.mark.hardware`, which auto-skip when no board is detected. Hardware detection is intentionally **not cached**, so you can plug/unplug between runs.
 
-**A note on cross-platform coverage:** the process-lifecycle tests (the riskiest code) use **cross-platform stub binaries**, not bash scripts, so they run on Windows, which is the platform this library targets. Stubs are generated by a factory in `conftest.py` that writes a small Python program plus a launcher (`.bat` on Windows, a shebang'd file on POSIX). This matters because the Windows interrupt path (`CTRL_BREAK_EVENT`, used to stop a running `hackrf_transfer`) is otherwise untested on the exact platform where it must work. Run `pytest tests/test_lifecycle_xplat.py` on Windows to prove the reap/stop machinery before attaching hardware.
+**A note on cross-platform coverage:** the process-lifecycle tests (the riskiest code) use **cross-platform stub binaries**, not bash scripts, so they run on Windows, which is the platform this library targets. Stubs are generated by a factory in `conftest.py` that writes a small Python program plus a launcher (`.bat` on Windows, a shebang'd file on POSIX). The Windows interrupt path (`CTRL_BREAK_EVENT`, used to stop a running `hackrf_transfer`) is tested explicitly: `tests/test_interrupt_clean.py` asserts the interrupt signal itself arrives (not the terminate escalation) and that the child's final flush survives into the result, and `tests/test_deadman.py` proves a hard-killed parent cannot orphan a child. Run `pytest tests/test_lifecycle_xplat.py tests/test_interrupt_clean.py tests/test_deadman.py` on Windows to prove the reap/stop machinery before attaching hardware.
 
 **Hardware-validated parsing.** The parsers (`parse_info`, `parse_sweep_line`, IQ decode) are tested against included sample data in `tests/fixtures/*_real.*`. Data can be collected from real hardware with `tests/test_real_output.py`.
 
@@ -295,7 +332,7 @@ Two feedback toggles control how chatty the library is:
 * `set_verbose(True/False)` (or `HackRF(verbose=True)`) — prints status/diagnostic messages (which mode it's in, capture size estimates, what a method did).
 * `allow_out_of_spec` (or `--force` on the CLI) — downgrades a reject-by-default range error to a stderr warning instead of an exception. Use with care; it exists for the rare legitimate out-of-spec case, not as a way to silence validation.
 
-Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, MHz edge truncation on sweep) print to **stderr unconditionally**. This is not blocked by the `verbose` toggle, because these are places where the library is still not fully stable.
+Safety and correctness warnings (gain snapping, sub-recommended sample rate, forced out-of-spec, outward MHz edge snapping on sweep) print to **stderr unconditionally**. This is not blocked by the `verbose` toggle, because these are places where the library is still not fully stable.
 
 Validation is not exhaustive, and the binaries and device do their own checks, so always consult the official documentation for valid ranges.
 
@@ -468,7 +505,7 @@ h.transmit(433.92e6, 8e6, "signal.iq", txvga=20)
 h.transmit(433.92e6, 8e6, "beacon.iq", repeat=True, max_duration=30.0)
 ```
 
-`max_duration` is best-effort: it stops the child on schedule from within the process. It does not survive a hard kill of the parent (`kill -9` / power loss); that needs an OS-level dead-man not yet implemented (see [project_summary.md](project_summary.md)).
+`max_duration` stops the child on schedule from within the process. Beneath it sit two more safety tiers: an `atexit` backstop that reaps live handles on normal interpreter exit, and an **OS dead-man** for the deaths `atexit` cannot see — on Linux the child sets `PR_SET_PDEATHSIG` to SIGINT (the clean flush path) so the kernel ends it the moment the parent dies, and on Windows the child runs inside a Job Object with `KILL_ON_JOB_CLOSE`, so even a `kill -9` / TerminateProcess of the parent cannot leave a transmitter on the air (power loss takes the device down with the host anyway). Both paths are covered by `tests/test_deadman.py` with a real parent hard-kill.
 
 ### Reading Recordings Back
 
@@ -489,7 +526,7 @@ fc = meta["captures"][0]["core:frequency"]
 ### Sample Data (no board required)
 
 Real recordings have been included under `examples/sample_data/` so the library basics can be tested without hardware. Each
-`.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs. The README in `examples/sample_data/`notes the firmware/tools that produced the data.
+`.iq` is interleaved int8 I/Q with a `.sigmf-meta` sidecar, plus sweep CSVs. The README in `examples/sample_data/` notes the firmware/tools that produced the data.
 
 ```python
 from hackrfpy import load_iq, read_sigmf_meta
@@ -518,10 +555,13 @@ The `examples/` directory has end-to-end scripts you can run against a board (al
 | `sweep_collect.py` | One sweep across a band saved to CSV. |
 | `waterfall_realtime.py` | Live spectrum waterfall (needs the `[plotting]` extra). |
 | `waterfall_persistent.py` | Single-frequency FFT waterfall over time, driven by a persistent receiver — the complement to the sweep waterfall (one channel evolving vs. a wide band). Needs the `[plotting]` extra. |
-| `persistent_capture.py` | Collect many segments at one frequency from a single long-lived process (amortizes startup). |
+| `persistent_capture.py` | Gapless back-to-back segments at one frequency from one long-lived receive process — contrast with `capture(segment_secs=...)`, whose files have a short re-open gap. |
+| `channel_monitor.py` | Live power meter on several frequencies at once via `monitor_frequencies` — one continuous sweep, no plotting extra needed. |
 | `benchmark.py` | Measure decode throughput, sustained-rate drop behavior, and callback latency on your hardware. |
 | `calibrate.py` | Calibration workflow (Levels 2–3): derive an absolute-ish `offset_db` from a known reference and/or a frequency-response curve, saved to `calibration.json`. |
-| `collect_sample_data.py` | Collect real sample datasets into `examples/sample_data/`. |
+| `collect_sample_data.py` | Collect real sample datasets into `examples/sample_data/`, with per-capture validation. |
+| `fm_demod_to_wav.py` | Demodulate a captured FM broadcast IQ file to an audible mono WAV — the downstream-processing boundary demo (numpy + stdlib only; never touches the device). |
+| `tx_test_tone.py` | The one transmitting example: a bounded CW test tone behind the TX-mode gate, with `--print-cmd` dry-run. |
 
 Run any of them through uv so the project environment is used, e.g. `uv run python examples/device_explorer.py`.
 
@@ -591,7 +631,7 @@ with h.open_receiver(100e6, 8e6) as rx:
 #### `monitor_frequencies`
 * **Signature:** `monitor_frequencies(freqs_hz, *, span_hz=2_000_000, duration=None, on_update=None, lna=16, vga=20, amp=False)`
 * **Returns:** a list of `{freq_hz: power_db}` dicts (one per sweep pass), or `None` if `on_update` is given.
-* **Notes:** watch **power over time** at several frequencies, backed by `hackrf_sweep`'s fast internal retuning. Deliberately separate from `scan_frequencies`: that one returns **IQ samples** (per-frequency captures); this returns **power** (spectrum bins) and never yields IQ. Use it for "is there activity on these channels?" monitoring. `on_update(update)` returning `False` stops it.
+* **Notes:** watch **power over time** at several frequencies, backed by `hackrf_sweep`'s fast internal retuning. Deliberately separate from `scan_frequencies`: that one returns **IQ samples** (per-frequency captures); this returns **power** (spectrum bins) and never yields IQ. The reported value is the sweep **bin covering the frequency** (max of that bin ±1 for tuning slop), not a segment average — a narrowband carrier reads at its true level. Use it for "is there activity on these channels?" monitoring. `on_update(update)` returning `False` stops it.
 
 #### `sweep_stream`
 * **Signature:** `sweep_stream(f_min_hz, f_max_hz, **kwargs)`
@@ -811,12 +851,19 @@ hrf presets                       # list band presets
 hrf rx -f 433.92M -s 8M -n 2000000 -o capture.iq
 hrf rx --preset ads-b -n 4000000  # a preset can supply the frequency
 
-# sweep (CSV to stdout)
+# sweep (CSV to stdout, or to a file; -B / -I binary passthrough need -o)
 hrf sweep --f-min 88M --f-max 108M
+hrf sweep --f-min 88M --f-max 108M -o fm.csv
+hrf sweep --f-min 88M --f-max 108M -o fm.bin -B
+
+# power monitoring and multi-frequency scanning
+hrf monitor 98.1M 103.7M -d 10    # power over time via one sweep
+hrf scan 98.1M 433.92M -n 262144  # per-frequency capture power (dBFS)
 
 # transmit (TX mode required)
 hrf mode tx
 hrf tx signal.iq -f 433.92M -s 8M -x 20
+hrf tx --cw -f 433.92M -s 2M -d 2 # bounded CW test tone; -d is mandatory
 ```
 
 Most commands accept `--print-cmd` to print the underlying `hackrf_*` command without running it, `--force` to downgrade range rejects to warnings, `--serial` to select a board, and `-v/--verbose`. Frequencies accept unit suffixes (`433.92M`, `1.09G`).
@@ -833,7 +880,7 @@ uv run pytest           # hardware tests self-skip without a device
 
 Per-command methods live in mixin modules under `src/hackrfpy/_commands/` and are composed onto the `HackRF` class in `core.py`. Adding a command usually means: add a method to the appropriate mixin, then add a command-construction test (assert the exact `hackrf_*` argv on the happy path via `print_cmd`, and assert nothing runs on the validation-error path). Process-lifecycle changes should be exercised with the cross-platform stub factory in `tests/conftest.py` so they are covered on Windows as well as POSIX.
 
-See [project_summary.md](project_summary.md) for the boundary between this project (transport + control) and the planned signal-processing/visualization project.
+The boundary of this project is transport + control: it hands you normalized `complex64` and takes back files to transmit. Signal processing and visualization belong to downstream projects; the examples show where that line sits.
 
 
 ## Notes for Beginners
@@ -877,7 +924,7 @@ Portability, especially on Windows. No C extension to compile means no toolchain
 
 ### Will there be signal processing (demod, FFTs, waterfalls)?
 
-Not in this library. That is the planned second project. This one stops at delivering `complex64`.
+Not in this library — it stops at delivering `complex64`, and signal processing belongs downstream. The examples show where that boundary sits: `fm_demod_to_wav.py` demodulates a capture to audible audio using only numpy and the stdlib, as a demonstration rather than an API.
 
 ### How often is this updated?
 

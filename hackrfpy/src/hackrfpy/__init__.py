@@ -11,8 +11,14 @@ from .exceptions import (
 )
 from . import constants
 
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    __version__ = _pkg_version("hackrfpy")
+except PackageNotFoundError:                     # running from a checkout
+    __version__ = "0.0.0+unknown"
+
 __all__ = [
-    "HackRF", "load_iq", "parse_freq", "constants",
+    "HackRF", "load_iq", "parse_freq", "constants", "__version__",
     "write_sigmf_meta", "read_sigmf_meta",
     "HackRFError", "HackRFValueError", "HackRFModeError",
     "HackRFDeviceError", "HackRFEnvironmentError",

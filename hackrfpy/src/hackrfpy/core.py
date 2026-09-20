@@ -29,6 +29,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import weakref
 from types import TracebackType
 from typing import Any, Callable, Generator, Literal, Protocol
@@ -77,8 +78,10 @@ def _ensure_console_logging() -> None:
 # ---- platform interrupt plumbing -------------------------------------------
 # hackrf_* tools flush + close cleanly on SIGINT. On Windows SIGINT can't be
 # delivered to a child; the equivalent is CTRL_BREAK_EVENT, which requires
-# the child to be in its own process group. Best-effort: exercised on POSIX,
-# untested on Windows.
+# the child to be in its own process group. Both paths are exercised by
+# tests/test_interrupt_clean.py, which asserts the interrupt signal itself
+# arrives (not the terminate() escalation) and that a handler's final flush
+# survives into the drained output -- the no-truncated-capture contract.
 if sys.platform == "win32":  # pragma: no cover
     _CREATION_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP
     _INTERRUPT_SIGNAL = signal.CTRL_BREAK_EVENT
@@ -100,13 +103,115 @@ def _interrupt(proc: subprocess.Popen[Any]) -> None:
 # It does NOT survive `kill -9` / power loss (no handler runs); that needs an
 # OS dead-man (Linux PR_SET_PDEATHSIG / Windows Job Object) which is platform-
 # split work deferred to a later pass.
-# TODO(os-deadman): Linux prctl(PR_SET_PDEATHSIG); Windows Job Object with
-# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Survives hard-kill of the parent.
+# ---- OS dead-man ------------------------------------------------------------
+# The atexit backstop never runs on SIGKILL / TerminateProcess, so a hard-
+# killed parent could orphan a live transmitter. The dead-man asks the OS
+# itself to end the child when the parent dies, surviving any kind of parent
+# death:
+#   Linux   : the child sets PR_SET_PDEATHSIG to SIGINT in preexec, so the
+#             kernel delivers the CLEAN interrupt (same flush path as stop())
+#             the moment the parent dies. A getppid() check closes the fork-
+#             window race where the parent died before prctl ran.
+#   Windows : the child is assigned to a Job Object with KILL_ON_JOB_CLOSE.
+#             The parent's death closes its handles; the OS then terminates
+#             the whole job -- including the .bat -> python launcher tree.
+#             The job handle lives on the _Process; dropping every reference
+#             to a running protected handle therefore lets GC close the job
+#             and reap the child, which is the dead-man philosophy applied
+#             to a leaked handle.
+#   macOS   : no equivalent primitive; the atexit backstop remains the only
+#             net there.
+# Scope: handle-mode spawns, gated exactly like the atexit registry below
+# (TX always, RX unless backstop_rx=False). Exercised by
+# tests/test_deadman.py, including a real parent hard-kill.
 #
 # TX handles are ALWAYS registered (an orphaned transmitter is a regulatory /
 # interference problem). RX handles are registered by default but can opt out
 # (an orphaned receiver only wastes disk, and fire-and-forget is occasionally
 # wanted).
+if sys.platform == "win32":
+    def _deadman_preexec() -> Any:
+        return None                      # Windows path uses the Job Object
+
+    def _deadman_attach(proc: subprocess.Popen[Any]) -> Any:
+        import ctypes
+        from ctypes import wintypes
+
+        class _BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in (
+                "ReadOperationCount", "WriteOperationCount",
+                "OtherOperationCount", "ReadTransferCount",
+                "WriteTransferCount", "OtherTransferCount")]
+
+        class _ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _BasicLimits),
+                        ("IoInfo", _IoCounters),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        _KILL_ON_JOB_CLOSE = 0x2000
+        _EXTENDED_LIMIT_CLASS = 9
+        try:
+            k32 = ctypes.windll.kernel32
+            job = k32.CreateJobObjectW(None, None)
+            if not job:
+                return None
+            info = _ExtendedLimits()
+            info.BasicLimitInformation.LimitFlags = _KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(
+                    job, _EXTENDED_LIMIT_CLASS, ctypes.byref(info),
+                    ctypes.sizeof(info)):
+                k32.CloseHandle(job)
+                return None
+            if not k32.AssignProcessToJobObject(
+                    job, wintypes.HANDLE(int(proc._handle))):  # type: ignore[attr-defined]
+                k32.CloseHandle(job)
+                return None
+            return job
+        except OSError:
+            return None                  # best-effort: never block a spawn
+else:
+    def _deadman_preexec() -> Any:
+        if not sys.platform.startswith("linux"):
+            return None                  # macOS: no pdeathsig primitive
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None, use_errno=True)
+        except OSError:
+            return None
+        _PR_SET_PDEATHSIG = 1
+
+        def _preexec() -> None:
+            libc.prctl(_PR_SET_PDEATHSIG, signal.SIGINT, 0, 0, 0)
+            if os.getppid() == 1:        # parent died in the fork window
+                os.kill(os.getpid(), signal.SIGINT)
+        return _preexec
+
+    def _deadman_attach(proc: subprocess.Popen[Any]) -> Any:
+        return None                      # POSIX path is the preexec
+
+
+_BUSY_MARKERS = ("Resource busy", "(-1000)")
+
+
+def _is_busy(text: str) -> bool:
+    # hackrf_open()'s "device still claimed" signature; see busy_retries.
+    return any(m in text for m in _BUSY_MARKERS)
+
+
 class _Stoppable(Protocol):
     # What the atexit backstop actually needs. _Process and PersistentReceiver
     # both satisfy it; a Protocol keeps _LIVE honest about holding both without
@@ -153,6 +258,7 @@ class _Process:
                  kind: str = "rx") -> None:
         self._proc = proc
         self._owner = owner
+        self._job: Any = None            # Windows Job Object (OS dead-man)
         self._kind = kind          # "rx" | "tx" -- for atexit messaging
         self._stopped = False
         self._out_chunks: list[bytes] = []
@@ -170,7 +276,13 @@ class _Process:
     @staticmethod
     def _drain(stream: Any, sink: list[bytes]) -> None:
         try:
-            for chunk in iter(lambda: stream.read(65536), b""):
+            # read1(): return as soon as ANY bytes are available (at most one
+            # raw read), b"" only at EOF. Plain read(65536) on a BufferedReader
+            # BLOCKS until 64 KB accumulate, so a child's small writes (e.g.
+            # hackrf_transfer's ~60-byte-per-second stats lines) were invisible
+            # to the parent until process exit -- output was only "live" if the
+            # child flooded past the buffer size.
+            for chunk in iter(lambda: stream.read1(65536), b""):
                 sink.append(chunk)
                 # Bound retained output: drop oldest chunks once over the cap,
                 # always keeping at least the latest one. Prevents unbounded
@@ -191,7 +303,18 @@ class _Process:
             try:
                 self._proc.wait(timeout=grace)
             except subprocess.TimeoutExpired:
+                # Escalation ladder, each rung bounded and REAPED: a child
+                # that ignores the interrupt gets terminate(); one that
+                # survives that gets kill(). stop() previously fired
+                # terminate() and returned without waiting, so a hardened
+                # child could outlive stop() and result() reported
+                # returncode None.
                 self._proc.terminate()
+                try:
+                    self._proc.wait(timeout=grace)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                    self._proc.wait()
         self._stopped = True
         _LIVE.discard(self)         # no longer needs the atexit backstop
         return self.result()
@@ -221,6 +344,22 @@ class _Process:
 
 
 class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
+    """Python controller for a HackRF One, driving the hackrf-tools binaries.
+
+    The constructor touches no hardware; use from_device() for a fail-fast
+    probed handle. Receive works immediately; transmitting requires the
+    deliberate set_mode('tx') arming step. NOT thread-safe: one instance
+    per thread (see the class comment below and the README).
+    """
+    # THREAD SAFETY: a HackRF instance is NOT safe to share across threads.
+    # Methods mutate per-instance state without locks -- last_params readback,
+    # the persisted operating-mode state, verbose/logging wiring -- and the
+    # process handles it returns own per-child drain threads whose lists are
+    # appended from those threads but read from the caller's. One instance
+    # per thread (they are cheap: the constructor touches nothing), or confine
+    # all hackrfpy calls to a single worker thread. This limitation predates
+    # 1.0 and is recorded here rather than "fixed" because the right fix
+    # (locking) would serialize the interesting operations anyway.
     def __init__(self, tools_dir: str | None = None, verbose: bool = False,
                  serial: str | None = None) -> None:
         # ---- feedback ----
@@ -255,6 +394,14 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # TX handles are ALWAYS atexit-stopped. RX handles are too by default;
         # set backstop_rx=False for deliberate fire-and-forget receivers.
         self.backstop_rx = True
+        # Device-busy retry: hackrf_open() reports "Resource busy (-1000)"
+        # when the previous child's USB claim has not been released yet --
+        # on Linux the kernel takes a beat after a tool exits, so rapid
+        # back-to-back operations (scan_frequencies, test suites, any
+        # capture-then-sweep script) can lose the race. Bounded retries with
+        # backoff absorb it; set busy_retries=0 to fail immediately.
+        self.busy_retries = 3
+        self.busy_backoff = 0.25         # seconds; doubles per attempt
 
         # ---- parameter readback ----
         # Populated by every validated operation with the ACTUAL values used
@@ -274,6 +421,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Feedback
     # =================================================================
     def set_verbose(self, verbose: bool = True) -> None:
+        """Enable or disable verbose progress output (INFO-level logging)."""
         self.verboseEnabled = verbose
         if verbose:
             # Make INFO actually visible in a plain script (see
@@ -283,15 +431,21 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                 log.setLevel(logging.INFO)
 
     def get_verbose(self) -> bool:
+        """Return whether verbose progress output is enabled."""
         return self.verboseEnabled
 
     def print_message(self, msg: str) -> None:
+        """Emit a progress message (INFO, stderr) if verbose is enabled."""
         # Progress / status chatter. INFO, and gated on verbose so the level and
         # the flag agree. Goes to stderr (never stdout) -- see the module note.
         if self.verboseEnabled:
             log.info(msg)
 
     def warn(self, msg: str) -> None:
+        """Emit a warning (WARNING, stderr) regardless of the verbose flag.
+
+        Used for safety and degraded-results notices that must never be silent.
+        """
         # Safety / correctness warnings the user must see REGARDLESS of verbose.
         # (A degraded-results or out-of-spec notice that only prints in verbose
         # mode is, in practice, a silent warning.) WARNING level, so it survives
@@ -311,9 +465,16 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         self.set_mode(value)
 
     def get_mode(self) -> str:
+        """Return the current operating mode: "rx" or "tx"."""
         return self._mode
 
     def set_mode(self, value: str) -> str:
+        """Switch operating mode ("rx" or "tx") and persist it.
+
+        Switching to TX prints the one-time safety banner. Transmit methods
+        refuse unless the instance is in TX mode; this switch is the deliberate
+        arming step.
+        """
         value = str(value).lower()
         if value not in C.MODES:
             raise HackRFValueError(
@@ -326,6 +487,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return self._mode
 
     def restore_mode(self, value: str) -> str:
+        """Rehydrate a previously persisted mode without the switch ceremony.
+
+        No banner, no chatter: for the CLI restoring state between invocations
+        (the banner already fired at the original mode switch).
+        """
         # Rehydrate previously-persisted mode WITHOUT the switch ceremony
         # (no banner, no chatter). For the CLI restoring state between
         # invocations; the banner already fired at the original `mode tx`.
@@ -337,6 +503,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         return self._mode
 
     def require_mode(self, needed: str) -> None:
+        """Raise HackRFModeError unless the instance is in the given mode."""
         if self._mode != needed:
             raise HackRFModeError(
                 f"operation requires '{needed}' mode but device is in "
@@ -421,6 +588,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def validate_rx(self, freq: float, sample_rate: float, lna: int,
                     vga: int) -> tuple[float, float, int, int]:
+        """Validate and snap receive parameters; return the values actually used.
+
+        Hard-range checks frequency and sample rate, snaps LNA/VGA to real
+        device gain steps. Returns (freq, sample_rate, lna, vga).
+        """
         freq = self._check_hard_range("frequency", freq,
                                       C.FREQ_MIN_HZ, C.FREQ_MAX_HZ)
         sample_rate = self._check_hard_range("sample_rate", sample_rate,
@@ -431,6 +603,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def validate_tx(self, freq: float, sample_rate: float, txvga: int,
                     amp: bool) -> tuple[float, float, int, bool]:
+        """Validate and snap transmit parameters; return the values actually used.
+
+        TX gain is capped by constants.TX_VGA_CEILING_DB. The only mode gate is
+        require_mode('tx'); frequency uses the full device range.
+        """
         # NOTE: TX frequency uses the full device range and is never policed by
         # --force; the only gate is being in TX mode. The gain ceiling guards
         # against an order-of-magnitude fat-finger.
@@ -454,6 +631,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Binary resolution
     # =================================================================
     def resolve(self, key: str) -> str:
+        """Return the full path of a hackrf tool by TOOLS key (e.g. 'transfer').
+
+        Raises HackRFDeviceError with an actionable message if the tool is not
+        found in tools_dir, the configured directory, or PATH.
+        """
         # key is a TOOLS key ("transfer", "info", ...). Returns the full path
         # or raises HackRFDeviceError with an actionable message.
         name = C.TOOLS[key]
@@ -485,6 +667,12 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     @classmethod
     def from_device(cls, *, tools_dir: str | None = None, verbose: bool = False,
                     serial: str | None = None) -> HackRF:
+        """Build a HackRF and immediately probe the attached board (fail fast).
+
+        Unlike the bare constructor (which touches nothing), this runs
+        hackrf_info: it raises HackRFDeviceError if tools are missing or no board
+        is present, and warns if the firmware looks stale.
+        """
         # Build a HackRF and immediately probe the attached board so callers
         # get a device whose reported firmware is known up front. Unlike the
         # bare constructor (which touches nothing), this RUNS hackrf_info, so
@@ -492,7 +680,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         # present. Use it when you want a fail-fast handle for scripting.
         h = cls(tools_dir=tools_dir, verbose=verbose, serial=serial)
         info = h.info()                      # raises if no tools / no board
-        assert isinstance(info, dict)        # raw=False -> parsed dict
+        if not isinstance(info, dict):       # raw=False -> parsed dict
+            # a plain assert is stripped under `python -O`, which would let a
+            # str flow onward; keep the guard a real, typed error
+            raise HackRFDeviceError(
+                "hackrf_info output could not be parsed into a device dict")
         if not info.get("boards"):
             raise HackRFDeviceError("no HackRF board detected")
         h._probed = info
@@ -546,18 +738,60 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         if mode == "stream":
             return self._stream(resolved, text=text, read_samples=read_samples)
         if mode == "handle":
+            # Tier C (OS dead-man): same gate as the atexit registry below.
+            protected = kind == "tx" or self.backstop_rx
+            preexec = _deadman_preexec() if protected else None
             proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
-                                    creationflags=_CREATION_FLAGS)
+                                    creationflags=_CREATION_FLAGS,
+                                    preexec_fn=preexec)
             handle = _Process(proc, self, kind=kind)
+            if protected:
+                handle._job = _deadman_attach(proc)
             # Tier B: TX always backstopped; RX backstopped unless opted out.
-            if kind == "tx" or self.backstop_rx:
+            if protected:
                 _register_live(handle)
             return handle
 
         if mode == "timed" and duration is None:
             raise HackRFValueError("timed mode requires duration")
 
+        for _busy_attempt in range(max(0, int(self.busy_retries)) + 1):
+            out, err, rc = self._run_once(resolved, mode, duration, text)
+            blob = self._text_of(err) + self._text_of(out)
+            if rc in (0, None) or not _is_busy(blob):
+                break
+            if _busy_attempt < self.busy_retries:
+                delay = self.busy_backoff * (2 ** _busy_attempt)
+                self.warn(f"device busy (previous claim not yet released); "
+                          f"retrying in {delay:.2f}s "
+                          f"({_busy_attempt + 1}/{self.busy_retries})")
+                time.sleep(delay)
+
+        # timed runs end via our SIGINT, so a non-zero rc there is expected.
+        if check and mode != "timed" and rc not in (0, None):
+            errtxt = self._text_of(err)
+            detail = errtxt.strip()
+            if not detail:
+                # some tools report failures on STDOUT with an empty stderr
+                # (Linux hackrf_info prints "No HackRF boards found." there,
+                # exit 1) -- without this fallback the error read
+                # "exited 1: " with the actual reason discarded
+                tail = [ln for ln in self._text_of(out).splitlines()
+                        if ln.strip()]
+                detail = tail[-1].strip() if tail else ""
+            raise HackRFDeviceError(
+                f"{C.TOOLS[argv[0]]} exited {rc}: {detail}")
+        return out, err, rc
+
+    @staticmethod
+    def _text_of(blob: Any) -> str:
+        if isinstance(blob, bytes):
+            return blob.decode(errors="replace")
+        return blob or ""
+
+    def _run_once(self, resolved: list[Any], mode: str,
+                  duration: float | None, text: bool) -> tuple[Any, Any, Any]:
         proc = subprocess.Popen(resolved, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=text,
                                 creationflags=_CREATION_FLAGS)
@@ -578,14 +812,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
             # capture would just start the next segment).
             self._sigint_and_reap(proc)
             raise
-
-        rc = proc.returncode
-        # timed runs end via our SIGINT, so a non-zero rc there is expected.
-        if check and mode != "timed" and rc not in (0, None):
-            errtxt = err.decode(errors="replace") if isinstance(err, bytes) else err
-            raise HackRFDeviceError(
-                f"{C.TOOLS[argv[0]]} exited {rc}: {errtxt.strip()}")
-        return out, err, rc
+        return out, err, proc.returncode
 
     @staticmethod
     def _sigint_and_reap(proc: subprocess.Popen[Any],
@@ -600,6 +827,29 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     def _stream(self, resolved: list[str], text: bool = False,
                 read_samples: int = 65536) -> Generator[Any, None, None]:
+        # Device-busy retry, stream flavor: if the child dies with the
+        # hackrf_open busy signature BEFORE anything was yielded, respawn
+        # with backoff (same policy as _run). Once data has flowed, a busy
+        # error can no longer be a stale-claim race and is raised as-is.
+        for _busy_attempt in range(max(0, int(self.busy_retries)) + 1):
+            yielded = False
+            try:
+                for item in self._stream_once(resolved, text, read_samples):
+                    yielded = True
+                    yield item
+                return
+            except HackRFDeviceError as e:
+                if (yielded or not _is_busy(str(e))
+                        or _busy_attempt >= self.busy_retries):
+                    raise
+                delay = self.busy_backoff * (2 ** _busy_attempt)
+                self.warn(f"device busy (previous claim not yet released); "
+                          f"retrying in {delay:.2f}s "
+                          f"({_busy_attempt + 1}/{self.busy_retries})")
+                time.sleep(delay)
+
+    def _stream_once(self, resolved: list[str], text: bool = False,
+                     read_samples: int = 65536) -> Generator[Any, None, None]:
         # Generator twin of _run. Launch, yield stdout as it arrives, clean up
         # on the caller breaking out (GeneratorExit) so we never leave a
         # transmitting/receiving process orphaned.
@@ -658,10 +908,39 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         finally:
             if proc.poll() is None:
                 _interrupt(proc)
+                # brief window with the pipe OPEN: a well-behaved child's
+                # SIGINT handler runs (flush, marker, clean close) and it
+                # exits here
+                try:
+                    proc.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    pass
+            if proc.poll() is None:
+                # Still alive: with the consumer gone, the 64 KB pipe fills
+                # in milliseconds at capture rates and the child is stuck
+                # inside write(); its SIGINT/SIGTERM handlers only set an
+                # exit flag a blocked write never returns to check. On real
+                # hardware the old interrupt->wait->terminate sequence left
+                # hackrf_transfer frozen in write(), HOLDING THE USB CLAIM
+                # until interpreter exit, and every later open failed
+                # "Resource busy". Closing our read end turns the frozen
+                # write into EPIPE/SIGPIPE so the child can die (the kernel
+                # releases the claim on any death) -- then finish the
+                # ladder, which previously stopped at an unreaped
+                # terminate().
+                try:
+                    stdout.close()
+                except OSError:
+                    pass
                 try:
                     proc.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
                     proc.terminate()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
         if not broke_out and proc.returncode not in (0, None):
             t.join(timeout=2.0)   # let the drain finish before reading it
             err = (b"" if not text else "").join(err_tail)
@@ -675,6 +954,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
     # Shared helpers used by mixins
     # =================================================================
     def decode_iq(self, raw: bytes) -> np.ndarray:
+        """Decode HackRF-native interleaved int8 I/Q bytes to complex64.
+
+        Values are normalized to roughly [-1, 1); an odd trailing byte
+        (truncated final pair) is dropped.
+        """
         # HackRF native format -> complex64. Interleaved int8 I,Q,I,Q...
         # Guard against an odd trailing byte (truncated final pair).
         #
@@ -703,6 +987,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     @staticmethod
     def power_dbfs(iq: np.ndarray) -> float:
+        """Mean power of a complex64 block in dBFS (0 dBFS = |amplitude| 1.0)."""
         # Mean power of a complex64 block in dBFS (dB relative to full scale).
         # 0 dBFS == |amplitude| 1.0 (ADC full scale). Always <= 0 for real
         # captures. This is the raw, UNCALIBRATED reading.
@@ -714,6 +999,7 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
 
     @staticmethod
     def gain_db(lna: int = 0, vga: int = 0, amp: bool = False) -> float:
+        """Total configured receive gain chain in dB (LNA + VGA + optional amp)."""
         # Total RX gain through the chain in dB: LNA (IF) + VGA (baseband) +
         # the fixed ~14 dB front-end amp if enabled. This is the quantity that
         # makes a raw dBFS reading ambiguous -- the SAME signal reads ~36 dB
@@ -726,6 +1012,12 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                           freq_hz: float | None = None,
                           freq_correction: Callable[[float], float] | None = None
                           ) -> float:
+        """Gain-normalized power: dBFS minus the configured gain chain.
+
+        Readings are consistent across gain settings but RELATIVE, not absolute
+        dBm, unless offset_db from a known reference is supplied
+        (see examples/calibrate.py).
+        """
         # Gain-normalized power: subtract the gain chain so readings taken at
         # DIFFERENT gain settings are directly comparable. This is the Level 1
         # relative calibration -- still not absolute dBm, but consistent.
@@ -761,6 +1053,11 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
                          num_samples: int | None = None,
                          duration: float | None = None,
                          path: str = ".") -> dict[str, Any]:
+        """Estimate bytes, duration, and disk fit for a planned capture.
+
+        Returns a dict including sizes and free-disk headroom; use before long
+        captures to avoid filling the drive mid-recording.
+        """
         # Bytes/sec = sample_rate * 2 (int8 I + int8 Q). Returns a dict and
         # raises HackRFEnvironmentError if it would blow past free disk.
         bps = sample_rate * C.BYTES_PER_SAMPLE

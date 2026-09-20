@@ -117,6 +117,30 @@ def test_sweep_warns_on_sub_mhz_edges(caplog, monkeypatch):
     assert "snapped to MHz" in "\n".join(r.message for r in caplog.records)
 
 
+def test_sweep_top_edge_ceiled(monkeypatch):
+    # regression: both edges used to be FLOORED, so sweep(433.9e6, 434.1e6)
+    # ran 433:434 and never covered 434.0-434.1 MHz. The high edge is now
+    # ceiled so the swept range always contains the requested band.
+    h = HackRF()
+    seen = {}
+    def rec_stream(argv, *a, **k):
+        seen["argv"] = [str(x) for x in argv]
+        if False:
+            yield
+    monkeypatch.setattr(h, "_run", rec_stream)
+    list(h.sweep(433_900_000, 434_100_000))
+    i = seen["argv"].index("-f")
+    assert seen["argv"][i + 1] == "433:435"
+
+
+def test_from_device_unparsed_info_raises_typed(monkeypatch):
+    # regression: this guard was a bare `assert`, stripped under python -O
+    h = HackRF()
+    monkeypatch.setattr(HackRF, "info", lambda self, **k: "raw text")
+    with pytest.raises(HackRFDeviceError):
+        HackRF.from_device(tools_dir=h.tools_dir)
+
+
 # ---- tx: max_duration converts an open-ended repeat into a timed run -------
 def test_tx_max_duration_forces_timed(monkeypatch, tmp_path):
     h = HackRF()
