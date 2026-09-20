@@ -28,7 +28,8 @@
 #
 #   Usage:
 #     uv run python examples/fm_demod_to_wav.py tests/fm_reference/fm_98.1MHz_8Msps.iq
-#     uv run python examples/fm_demod_to_wav.py tests/fm_testdata/fm_hw_103.7MHz_2Msps.iq --offset 300e3
+#     uv run python examples/fm_demod_to_wav.py \
+#            tests/fm_testdata/fm_hw_103.7MHz_2Msps.iq --offset 300e3
 #
 #
 #   Author(s): Lauren Linkous

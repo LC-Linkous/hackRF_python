@@ -56,7 +56,7 @@ def main():
     h = HackRF(tools_dir=args.tools_dir)
     labels = {f: f"{f/1e6:9.3f} MHz" for f in freqs}
     print("[*] monitoring "
-          + ", ".join(l.strip() for l in labels.values())
+          + ", ".join(lab.strip() for lab in labels.values())
           + "   (Ctrl-C to stop)")
 
     # In-place redraw: this is a live METER, so each update overwrites the
