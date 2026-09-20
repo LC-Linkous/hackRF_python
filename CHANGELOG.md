@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Work on the current development branch. Entries move to a versioned section on
 release.
 
+## [1.1.0] - 2026-09-19
+
+Hardening-and-verification release: process lifecycle, cross-platform
+support, CLI/API surface, and docs. Everything here is hardware-verified on
+Windows and Linux against real boards. Behavior changes: `sweep()` edges now
+snap outward to whole MHz; `monitor_frequencies()` reads the covering bin
+(not a segment mean) and emits one complete update per sweep pass.
+
 ### Added
 - Linux promoted from experimental to hardware-verified. Verification run
   2026-09-19 on Debian 12 (bookworm, kernel 6.12.95, Dell Latitude 7420)
@@ -165,10 +173,6 @@ release.
   threads -- per-instance mutable state (`last_params`, persisted mode,
   logging wiring) and per-child drain threads. One instance per thread;
   instances are cheap. In the README and on the class.
-- Coverage policy recorded in CONTRIBUTING: CI gates at
-  `--cov-fail-under=82`, deliberately under the measured 85% because that
-  figure counts Windows-only and hardware-only code as missed on Linux legs;
-  to be revisited upward after the docstring pass.
 - `hackrfpy.__version__`, resolved from installed package metadata
   (`importlib.metadata`), with a `0.0.0+unknown` fallback for uninstalled
   checkouts.
@@ -185,15 +189,11 @@ release.
   modulation, and spectral flatness 0.09 (structured content, not noise).
 
 ### Changed
-- CI platform policy: the test matrix now contains hardware-verified
-  platforms only -- currently Windows (primary) and macOS -- and Linux was
-  removed until it is verified against a real board, at which point it
-  returns under the same standards. The coverage gate rose from 82% to an
-  85% minimum on every remaining leg, and the codecov upload moved from the
-  removed Linux leg to the Windows 3.12 leg. Known consequence, recorded in
-  the workflow comment: the Linux `pdeathsig` dead-man path only executes on
-  a Linux runner, so it is regression-untested until Linux re-enters the
-  matrix.
+- CI platform policy: the test matrix contains hardware-verified platforms,
+  held to an 85% minimum coverage gate (`--cov-fail-under=85`) on every leg;
+  with Linux verified (see Added), the matrix is Windows (primary), Linux,
+  and macOS pending its own verification. Codecov reporting moved to the
+  Windows 3.12 leg.
 - CONTRIBUTING policy rewrite to match: 85% minimum coverage, the
   hardware-verified-platforms rule, and a new requirement that any change
   under `src/hackrfpy/` include evidence of a full-suite run (hardware tests
@@ -390,5 +390,6 @@ Initial public release.
 - Validation layer with hard-range checks, gain snapping to real device steps,
   and a parameter readback (`last_params`) reflecting the values actually used.
 
-[Unreleased]: https://github.com/LC-Linkous/hackRF_python/compare/V1.0.0...HEAD
+[Unreleased]: https://github.com/LC-Linkous/hackRF_python/compare/V1.1.0...HEAD
+[1.1.0]: https://github.com/LC-Linkous/hackRF_python/compare/V1.0.0...V1.1.0
 [1.0.0]: https://github.com/LC-Linkous/hackRF_python/releases/tag/V1.0.0
