@@ -69,6 +69,7 @@ STDERR_FLOOD = {stderr_flood!r}
 IDLE = {idle!r}
 EXIT_CODE = {exit_code!r}
 EMIT_BYTES = {emit_bytes!r}
+EMIT_CHUNK_SIZES = {emit_chunk_sizes!r}
 TAIL_ON_INTERRUPT = {tail_on_interrupt!r}
 IGNORE_INTERRUPT = {ignore_interrupt!r}
 BUSY_FAILS = {busy_fails!r}
@@ -131,8 +132,17 @@ if STDERR_FLOOD:
     sys.stderr.flush()
 
 if EMIT_BYTES:
-    sys.stdout.buffer.write(bytes(EMIT_BYTES))
-    sys.stdout.buffer.flush()
+    if EMIT_CHUNK_SIZES:
+        # write + flush in the given piece sizes (cycled), so the parent's
+        # read1() can observe a pipe boundary inside an I/Q pair
+        _raw, _pos, _k = bytes(EMIT_BYTES), 0, 0
+        while _pos < len(_raw):
+            _n = EMIT_CHUNK_SIZES[_k % len(EMIT_CHUNK_SIZES)]; _k += 1
+            sys.stdout.buffer.write(_raw[_pos:_pos + _n]); _pos += _n
+            sys.stdout.buffer.flush()
+    else:
+        sys.stdout.buffer.write(bytes(EMIT_BYTES))
+        sys.stdout.buffer.flush()
 
 for line in STDOUT_LINES:
     sys.stdout.write(line + "\\n")
@@ -163,13 +173,15 @@ sys.exit(EXIT_CODE)
 def _write_stub(tools_dir, name, *, stdout_lines=(), stderr_lines=(),
                 stderr_flood=0, idle=False, exit_code=0, marker=None,
                 emit_bytes=None, tail_on_interrupt=None,
-                ignore_interrupt=False, busy_fails=0, stdout_flood=0):
+                ignore_interrupt=False, busy_fails=0, stdout_flood=0,
+                emit_chunk_sizes=None):
     py_path = os.path.join(tools_dir, name + ".py")
     body = _STUB_TEMPLATE.format(
         marker=marker, stdout_lines=list(stdout_lines),
         stderr_lines=list(stderr_lines), stderr_flood=stderr_flood,
         idle=idle, exit_code=exit_code,
         emit_bytes=list(emit_bytes) if emit_bytes else None,
+        emit_chunk_sizes=list(emit_chunk_sizes) if emit_chunk_sizes else None,
         tail_on_interrupt=tail_on_interrupt,
         ignore_interrupt=ignore_interrupt, busy_fails=busy_fails,
         stdout_flood=stdout_flood)

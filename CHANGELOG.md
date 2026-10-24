@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Work on the current development branch. Entries move to a versioned section on
 release.
 
+### Fixed
+- `PersistentReceiver.blocks()` could swap I and Q for the rest of a stream.
+  A pipe may return fewer bytes than `read1()` asked for, so a raw chunk can
+  end mid-pair; `blocks()` handed each chunk straight to `decode_iq`, which
+  drops an odd trailing byte, and from that point every sample's I and Q
+  were exchanged -- power statistics stay healthy while the phase is
+  garbage. `capture()`'s stream path already carried the odd byte forward;
+  `blocks()` now does the same, through the carry buffer `read()` uses, so
+  the two can be mixed on one receiver. Two regression tests feed odd-sized
+  chunks directly and check the decoded ramp byte-for-byte. Anything that
+  streamed through `open_receiver().blocks()` (the `waterfall_persistent` and
+  `persistent_capture` examples, downstream `IQSource` adapters) is affected.
+
 ## [1.1.0] - 2026-09-19
 
 Hardening-and-verification release: process lifecycle, cross-platform

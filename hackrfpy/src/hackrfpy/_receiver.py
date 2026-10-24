@@ -173,17 +173,22 @@ class PersistentReceiver:
         # Yield decoded complex64 blocks as they arrive (raw cadence), until
         # the stream ends or the caller stops iterating. Good for a continuous
         # consumer that doesn't need a fixed sample count per read.
+        # An odd-length chunk splits an I/Q pair across two reads. decode_iq
+        # DROPS an odd trailing byte, and dropping one byte here would swap
+        # I and Q for every sample that follows (capture()'s stream path
+        # carries the byte for exactly this reason). The read1() cap in
+        # _run is even, but a pipe is free to return fewer bytes than
+        # asked, so the odd case is real. Carry the byte in self._carry,
+        # the same buffer read() uses, so blocks() and read() can be mixed.
         gen = self._ensure_open()
-        if self._carry:
-            lead = self._h.decode_iq(self._carry)
-            self._carry = b""
-            if len(lead):
-                self.total_samples += len(lead)
-                yield lead
         for chunk in gen:
-            iq = self._h.decode_iq(chunk)
-            self.total_samples += len(iq)
-            yield iq
+            buf = self._carry + chunk
+            cut = len(buf) - (len(buf) % 2)
+            self._carry = buf[cut:]
+            if cut:
+                iq = self._h.decode_iq(buf[:cut])
+                self.total_samples += len(iq)
+                yield iq
 
     def callback(self, on_block: Callable[[np.ndarray, int], Any], *,
                  max_samples: int | None = None) -> int:
