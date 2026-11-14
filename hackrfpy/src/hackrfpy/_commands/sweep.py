@@ -15,7 +15,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, Iterable
+
+import numpy as np
 
 from .. import constants as C
 from .._host import HostOps
@@ -110,6 +112,90 @@ class SweepMixin(HostOps):
         if rows is None:                  # print_cmd=True -> dry run, nothing collected
             return []
         return list(rows)
+
+    @staticmethod
+    def iter_sweep_passes(rows: Iterable[dict[str, Any]]
+                          ) -> Generator[dict[str, Any], None, None]:
+        """Group parsed sweep rows into whole passes, one contiguous array each.
+
+        Pure function over rows from sweep() / parse_sweep_line(); no device.
+        Yields, per pass:
+
+            {"start": hz, "stop": hz, "bin_width": hz, "points": n,
+             "level": np.ndarray[float32, n]   # ascending frequency,
+             "date": str, "time": str,         # first row of the pass
+             "segments": k, "contiguous": bool}
+
+        The pass boundary is SEGMENT REVISIT -- the same hz_low arriving
+        again -- never a timestamp change. Real hackrf_sweep stamps each row
+        individually, so a timestamp boundary flushes on nearly every row over
+        a wide span and emits partial spectra (this is what broke
+        monitor_frequencies on hardware before 1.1.0; a consumer that groups
+        by timestamp has the same bug). Segments arrive out of frequency
+        order and are sorted here. Bins a pass never covered (a gap between
+        segments, which hackrf_sweep does not normally produce) are NaN, and
+        "contiguous" is False, so a plot shows a hole rather than a lie.
+
+        A trailing partial pass (stream ended mid-pass) is yielded last with
+        whatever it has; check "segments" if that matters.
+        """
+        seen: set[int] = set()
+        batch: list[dict[str, Any]] = []
+        for row in rows:
+            low = int(row["hz_low"])
+            if low in seen:
+                yield SweepMixin._stitch_pass(batch)
+                seen.clear()
+                batch = []
+            seen.add(low)
+            batch.append(row)
+        if batch:
+            yield SweepMixin._stitch_pass(batch)
+
+    @staticmethod
+    def _stitch_pass(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        rows = sorted(rows, key=lambda r: int(r["hz_low"]))
+        bw = float(rows[0]["bin_width"])
+        start = int(rows[0]["hz_low"])
+        stop = max(int(r["hz_high"]) for r in rows)
+        n = int(round((stop - start) / bw))
+        level = np.full(n, np.nan, dtype=np.float32)
+        covered = 0
+        for r in rows:
+            db = np.asarray(r["db"], dtype=np.float32)
+            i0 = int(round((int(r["hz_low"]) - start) / bw))
+            i1 = min(n, i0 + db.size)
+            level[i0:i1] = db[: i1 - i0]
+            covered += i1 - i0
+        return {"start": start, "stop": stop, "bin_width": bw, "points": n,
+                "level": level, "date": rows[0].get("date"),
+                "time": rows[0].get("time"), "segments": len(rows),
+                "contiguous": covered >= n}
+
+    def sweep_passes(self, f_min_hz: float, f_max_hz: float, *,
+                     bin_width: float | None = None,
+                     lna: int = 16, vga: int = 20, amp: bool = False,
+                     num_sweeps: int | None = None
+                     ) -> Generator[dict[str, Any], None, None]:
+        """Stream a sweep as whole passes: one stitched spectrum per pass.
+
+        sweep() with iter_sweep_passes() applied: the consumer gets a
+        contiguous, frequency-sorted float32 array per complete pass instead
+        of interleaved segments. Same validation, snapping and child
+        lifecycle as sweep(); break out of the loop (or close the generator)
+        to stop hackrf_sweep. Edges snap outward to whole MHz, so "start" and
+        "stop" are the swept edges, not the requested ones.
+        """
+        rows = self.sweep(f_min_hz, f_max_hz, bin_width=bin_width, lna=lna,
+                          vga=vga, amp=amp, num_sweeps=num_sweeps)
+        assert rows is not None               # print_cmd is not offered here
+
+        def _gen() -> Generator[dict[str, Any], None, None]:
+            try:
+                yield from SweepMixin.iter_sweep_passes(rows)
+            finally:
+                rows.close()                  # reaps hackrf_sweep on early exit
+        return _gen()
 
     def monitor_frequencies(self, freqs_hz: list[float], *,
                             span_hz: float = 2_000_000,

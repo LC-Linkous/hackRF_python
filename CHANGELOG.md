@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Work on the current development branch. Entries move to a versioned section on
 release.
 
+### Added (toward 1.2.0 -- the hackrf-web 0.3 support release; all additive)
+- `encode_iq(iq) -> bytes` (module-level, also `HackRF.encode_iq`): the
+  exact inverse of `decode_iq` / `load_iq`. Multiplies by 128, rounds to
+  nearest, clips to int8, interleaves I,Q. `decode -> encode -> decode` is
+  lossless and a stream re-encoded from decoded blocks is byte-identical,
+  which is the property a recorder built on `open_receiver()` needs; until
+  now that inverse lived in downstream code next to a comment saying "exact
+  inverse of hackrfpy.decode_iq", where a change to either side would have
+  broken recordings silently. Tested against `sample_real.iq`, every int8
+  code, and the rint/clip edge cases.
+- `SweepMixin.iter_sweep_passes(rows)` (pure, static) and
+  `HackRF.sweep_passes(...)`: group `sweep()` rows into whole passes and
+  yield one contiguous, frequency-sorted float32 array per pass
+  (`start`, `stop`, `bin_width`, `points`, `level`, `segments`,
+  `contiguous`). The pass boundary is segment revisit, the rule
+  `monitor_frequencies` learned from hardware in 1.1.0 -- real `hackrf_sweep`
+  stamps each row individually, so any consumer grouping by timestamp emits
+  partial spectra on a real board while passing against stubs that share one
+  stamp per pass. That rule now has a name and tests instead of living
+  inside one method. Gaps between segments are NaN with `contiguous: False`.
+  `sweep_passes()` closes the row generator on early exit, so breaking out of
+  the loop still reaps `hackrf_sweep`.
+- `constants.RECOMMENDED_LNA = 32` and `RECOMMENDED_VGA = 28`, with the
+  2026-09-17 rationale (16/20 produced ~3-bit captures on a typical
+  antenna). The API defaults on `capture()`/`open_receiver()`/`sweep()` are
+  unchanged for compatibility; `examples/collect_sample_data.py` now reads
+  the constants instead of repeating the numbers, and new consumers should
+  reference them by name.
+
 ### Fixed
 - `PersistentReceiver.blocks()` could swap I and Q for the rest of a stream.
   A pipe may return fewer bytes than `read1()` asked for, so a raw chunk can

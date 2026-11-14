@@ -976,6 +976,15 @@ class HackRF(InfoMixin, CaptureMixin, TransmitMixin, SweepMixin, DeviceMixin):
         iq /= 128.0          # normalize int8 full-scale to ~[-1, 1)
         return iq
 
+    @staticmethod
+    def encode_iq(iq: np.ndarray) -> bytes:
+        """Encode complex samples to HackRF-native interleaved int8 bytes.
+
+        The inverse of decode_iq: see the module-level encode_iq() for the
+        contract. Provided on the class for symmetry with decode_iq.
+        """
+        return encode_iq(iq)
+
     # ---- power / relative calibration (Level 1) ----------------------------
     # These turn the device's arbitrary dBFS amplitude into something that is
     # at least CONSISTENT across gain settings (and, with a user-supplied
@@ -1127,3 +1136,28 @@ def load_iq(path: str, count: int | None = None,
     iq.imag = a[1::2]
     iq /= 128.0
     return iq
+
+
+def encode_iq(iq: np.ndarray) -> bytes:
+    """Encode complex samples to HackRF-native interleaved int8 I/Q bytes.
+
+    The exact inverse of decode_iq() / load_iq() for anything they produced:
+    those divide by 128, this multiplies by 128, rounds to nearest, and clips
+    to the int8 range, so decode -> encode -> decode is lossless and a
+    recording re-encoded from decoded blocks is byte-identical to the stream
+    (the property hackrf-web's recorder relies on). For arbitrary complex
+    input it is the natural quantiser: +1.0 clips to 127, -1.0 maps to -128.
+
+    Returns bytes laid out I0, Q0, I1, Q1, ... -- the format hackrf_transfer
+    reads for -t and writes for -r, and the SigMF "ci8" datatype.
+    """
+    iq = np.asarray(iq)
+    if iq.ndim != 1:
+        raise HackRFValueError(
+            f"encode_iq expects a 1-D complex array, got shape {iq.shape}")
+    out = np.empty(2 * iq.size, dtype=np.int8)
+    # rint, not astype: astype truncates toward zero and would bias every
+    # sample toward 0 by up to one code.
+    out[0::2] = np.clip(np.rint(iq.real * 128.0), -128, 127)
+    out[1::2] = np.clip(np.rint(iq.imag * 128.0), -128, 127)
+    return out.tobytes()

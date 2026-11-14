@@ -45,6 +45,18 @@ TXVGA_GAIN = (0, 47, 1)          # TX IF gain
 # Front-end amplifier is a fixed ~14 dB block, on/off only.
 AMP_DB = 14
 
+# ---- recommended starting gains for a receive capture ----------------------
+# The API defaults (lna=16, vga=20 on capture()/open_receiver()/sweep()) are
+# unchanged for compatibility, but they are LOW: on 2026-09-17 a typical
+# antenna at 16/20 produced captures spanning only +/-4 of the 127 int8 codes
+# (effectively 3-bit recordings) that passed every power check. The collection
+# tools moved to 32/28 and so should any new consumer. Reference these BY NAME
+# rather than copying the numbers, so a future revision reaches everyone.
+# Tune per band from here; a short probe through a capture-health check tells
+# you whether the ADC is under-driven or clipping.
+RECOMMENDED_LNA = 32             # dB, on the LNA_GAIN steps
+RECOMMENDED_VGA = 28             # dB, on the VGA_GAIN steps
+
 # ---- TX safety ceilings (default at true device max so an order-of-magnitude
 #      typo rejects; tighten these for a specific bench) ----------------------
 TX_VGA_CEILING_DB = TXVGA_GAIN[1]    # 47; lower this to cap output on a bench

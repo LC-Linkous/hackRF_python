@@ -47,6 +47,7 @@ for cand in (os.path.join(_HERE, "..", "src"), os.path.join(_HERE, "src")):
 
 from hackrfpy import HackRF, load_iq            # noqa: E402
 from hackrfpy.exceptions import HackRFError     # noqa: E402
+from hackrfpy import constants as C              # noqa: E402
 
 try:
     import numpy as np                          # noqa: E402
@@ -265,10 +266,10 @@ def main():
                    help="sample rate in sps (default 2e6, small + USB-friendly)")
     p.add_argument("--sweep-count", type=int, default=1,
                    help="sweeps per band dataset (default 1)")
-    p.add_argument("--lna", type=int, default=32,
+    p.add_argument("--lna", type=int, default=C.RECOMMENDED_LNA,
                    help="LNA gain dB (default 32; the old library default of "
                         "16 produced ~3-bit captures on 2026-09-17)")
-    p.add_argument("--vga", type=int, default=28,
+    p.add_argument("--vga", type=int, default=C.RECOMMENDED_VGA,
                    help="VGA gain dB (default 28)")
     p.add_argument("--hunt", action="store_true",
                    help="for bursty bands (ISM, airband): probe until a "
